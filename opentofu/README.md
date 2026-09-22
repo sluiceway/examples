@@ -54,7 +54,7 @@ Sluiceway never passes an argument of your choice to `tofu`. The named options a
 
 The state lives in OpenTofu's local backend, next to each module: `notes/terraform.tfstate` for the default workspace, and `site/terraform.tfstate.d/dev/terraform.tfstate` and `site/terraform.tfstate.d/prod/terraform.tfstate` for the two workspaces of `site/`. Git ignores these files.
 
-On the runner that directory is gone after every job, so the workflow keeps the state in a workflow artifact, together with Pulumi's file backend. **This is a stand-in for a real backend**, not part of a normal install:
+On the runner that directory is gone after every job, so the workflow keeps the state in a workflow artifact, together with Pulumi's file backend. **This is a stand-in for a real backend**, not part of a normal install. In a public repo anyone who is logged in to GitHub can download the artifact, and the state holds every value in plain text, the ones marked `sensitive` too. Here they are all fake, such as `CANARY-SECRET`. Never keep real state this way:
 
 - `apply` restores the newest state, deploys one stack and saves the state as an artifact of its own, also after a failed deploy.
 - The scan restores the newest state, and saves it again only when the newest is 30 days old, before it expires.

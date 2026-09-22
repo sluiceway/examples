@@ -15,6 +15,10 @@
 # denied: token has no writable scopes"). The save only warns, so the deploy
 # stays green and its state is lost. An artifact upload works in that job.
 #
+# Never keep real state this way. In a public repo anyone logged in to GitHub
+# can download an artifact, and a state file holds every value in plain
+# text, OpenTofu's sensitive values too. Every value here is fake.
+#
 # restore needs GH_TOKEN with actions: read. It stops the job when the list
 # of artifacts cannot be read: an empty start there would be saved as the
 # newest state and drop every deploy.

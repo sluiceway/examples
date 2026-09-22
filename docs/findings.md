@@ -123,3 +123,12 @@ At `e574d67` (0.8.0), the check's line per stack (`src/render/check.ts:30-33`) n
 ## 2026-09-22: a failed Pulumi command exits 1 on the runner
 
 Not the action's doing. `pulumi/states/broken-preview` and `broken-deploy` fail on purpose, and their rows read `the tool exited with an error (exit code 1)` ([run 35717667788](https://github.com/sluiceway/examples/actions/runs/35717667788), [run 35720086540](https://github.com/sluiceway/examples/actions/runs/35720086540)). The same programs exit 255 with Pulumi v3.198.0 on a laptop. The workflow installs `^3.229.0`, which exits 1. The row gives the code as the tool gave it, which is what record 0022 asks for, so a reader should not rely on one number across Pulumi versions.
+
+## 2026-09-22: the attribution line of a stack that claims no merge
+
+At `5f2fc11` (0.18.0), `src/core/attribution.ts:229-238` builds the line under a pending row. Two cases read oddly, both on `pulumi/states/every-run:prod`, a stack that is pending because it reads the clock, not because of a merge:
+
+- **No merge claimed, others landed.** The line reads `from 1 change outside this stack · compare`, as in the full scan [run 35743359336](https://github.com/sluiceway/examples/actions/runs/35743359336). "from" names what made the row pending, and here nothing outside the stack did. `and 1 change outside this stack` reads right after a pull request (the rows of `greeting:dev` and `opentofu/notes` have it), but alone it says the opposite of what is true.
+- **Nothing landed at all.** The line reads `nothing this stack claims has changed since its last deploy · compare`, with a compare link from `f9570cc055ce` to `f9570cc055ce` ([run 35741257396](https://github.com/sluiceway/examples/actions/runs/35741257396)). GitHub's page for it says there is nothing to compare. The line is right. The link has nothing to show.
+
+With `from` alone, the line could say "no change this stack claims, 1 change outside it" and drop the compare link when both ends are the same commit.

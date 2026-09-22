@@ -29,9 +29,15 @@ Sluiceway runs one dashboard per repo, with its settings at the repo root. So ev
 
 The dashboard is meant to show every state and line the action can draw, from real runs: stacks deployed and in sync, a failed deploy, a preview that fails on purpose, a delete waiting for a tick, a stack left out with a reason, and more. [`docs/showcase.md`](docs/showcase.md) lists each one, the word the action's glossary uses for it, and what in this repo makes it show.
 
-## The stack that stays pending
+## The rows that stay as they are
 
-`pulumi/plain/release:prod` is kept pending on purpose. Its program is in the repo and it is never deployed, so the dashboard always has a pending row with a box, a preview page and a diff for a visitor to open. Please do not tick it.
+Some rows are kept as they are on purpose, so a visitor always finds them. Please do not tick them:
+
+- `pulumi/plain/release:prod` is never deployed, so the dashboard always has a pending row with a box, a preview page and a diff to open.
+- `pulumi/plain/greeting:dev` shows a new greeting as `Hello → Good morning`, `pulumi/states/retire:prod` a delete and a replace, and `opentofu/notes` a move in the state. Each names the pull request that made it pending.
+- `pulumi/states/broken-preview:prod` and `pulumi/states/broken-deploy:prod` fail on purpose, and `pulumi/states/every-run:prod` and `pulumi/states/drift:prod` come back after every deploy.
+
+[`docs/showcase.md`](docs/showcase.md) says what each one shows.
 
 ## What you can see here that a real repo keeps off
 
@@ -45,7 +51,7 @@ In a real repo, read the action's [configuration](https://github.com/sluiceway/s
 ## How this repo stays credential-free
 
 - **No cloud.** The Pulumi programs use the providers `random`, `command` and `local`, the OpenTofu modules `random` and the built-in `terraform_data`. They make random names, run `echo`, write a file on the runner and keep a few values in the state.
-- **No state service.** The state lives on the runner, in Pulumi's file backend and in OpenTofu's local backend, and a workflow artifact keeps both between runs, with [`state.sh`](.github/scripts/state.sh). Each deploy saves one of its own, and the next scan and deploy restore the newest. Deploys run one at a time, so two never start from the same state. An artifact expires after 90 days, so when no deploy saved one for 30 days, the scan saves the state again. Not the Actions cache: a deploy from a tick runs in a job that an issue edit started, and such a job cannot write the cache. A real repo uses a bucket, Pulumi Cloud or another remote backend. If the state is ever lost, every stack looks new and is pending again.
+- **No state service.** The state lives on the runner, in Pulumi's file backend and in OpenTofu's local backend, and a workflow artifact keeps both between runs, with [`state.sh`](.github/scripts/state.sh). Each deploy saves one of its own, and the next scan and deploy restore the newest. Deploys run one at a time, so two never start from the same state. An artifact expires after 90 days, so when no deploy saved one for 30 days, the scan saves the state again. Not the Actions cache: a deploy from a tick runs in a job that an issue edit started, and such a job cannot write the cache. A real repo uses a bucket, Pulumi Cloud or another remote backend. If the state is ever lost, every stack looks new and is pending again. **Never keep real state this way:** in a public repo anyone who is logged in to GitHub can download a workflow artifact, and a state file holds values in plain text, OpenTofu's sensitive values included. Here every value in the state is fake.
 - **A public passphrase.** Pulumi stack secrets are encrypted with the passphrase `sluiceway-examples`, which is written in the workflow. It is public on purpose and protects nothing. The one secret value in every stack is the fake string `CANARY-SECRET`: a Pulumi secret, or an OpenTofu variable marked `sensitive`. Every program sets one property to the fake string `CANARY-VALUE`. Neither must ever show on the dashboard.
 - **No secret manager.** `pulumi/secret-manager` loads its API key from fake references, which a stand-in script resolves from a committed file of fake values. The scan loads `FAKE-READ-KEY-not-a-secret` and `apply` loads `FAKE-DEPLOY-KEY-not-a-secret`. Neither must ever show on the dashboard, and in the job log they must show only as `***`.
 - **No secrets in the repo settings.** The workflows use the workflow's own `GITHUB_TOKEN` and nothing else.
