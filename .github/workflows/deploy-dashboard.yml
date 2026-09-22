@@ -105,7 +105,11 @@ jobs:
           mode: scan
 
   resolve:
-    if: github.event_name == 'issues' && contains(github.event.issue.labels.*.name, 'sluiceway')
+    # Also on "Run workflow", as in the action's README since 0.6.0. With
+    # dependsOn in sluiceway.yaml, settle starts the workflow again once a
+    # stack went out, and this job then starts the stacks queued behind it.
+    # This repo has no dependsOn, so here it finds nothing in a few seconds.
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'issues' && contains(github.event.issue.labels.*.name, 'sluiceway'))
     runs-on: ubuntu-latest
     concurrency: sluiceway-resolve
     outputs:
