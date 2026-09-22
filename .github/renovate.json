@@ -1,0 +1,19 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:recommended",
+    "helpers:pinGitHubActionDigests",
+    ":semanticCommits"
+  ],
+  "timezone": "Etc/UTC",
+  "schedule": ["before 6am on monday"],
+  "prConcurrentLimit": 5,
+  "packageRules": [
+    {
+      "description": "The examples teach sluiceway/sluiceway@v0, the moving tag that the action's README tells a new user to copy. Renovate leaves it as it is: no digest pin and no update. A real repo may pin a commit instead, as the action's README says under 'Pin a commit'.",
+      "matchManagers": ["github-actions"],
+      "matchPackageNames": ["sluiceway/sluiceway"],
+      "enabled": false
+    }
+  ]
+}

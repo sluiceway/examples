@@ -1,0 +1,22 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/sluiceway/sluiceway/main/schema/sluiceway.schema.json
+#
+# Sluiceway's settings for this repo. Every key is optional: without this file
+# Sluiceway still finds every stack and gives each one a row. The whole list
+# of keys is in https://github.com/sluiceway/sluiceway/blob/main/docs/configuration.md
+#
+# Nothing here is about one tool. Pulumi, OpenTofu and Terraform stacks all
+# show on the one dashboard, and their ids come from their directories.
+
+dashboard:
+  # The title the dashboard issue gets when Sluiceway first creates it.
+  title: Sluiceway examples
+
+scan:
+  # Files that no program reads. A push that changes only these previews no
+  # stack. A changed file that no stack claims makes a full scan instead,
+  # which is the safe side. This block is the one the check suggested.
+  unrelated:
+    - "**/*.md"
+    - "docs/**"
+    - ".github/**"
+    - "LICENSE*"
