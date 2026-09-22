@@ -1,7 +1,8 @@
 // The summary of one verification (docs/release-verification.md, "The
 // summary"): a table of scenarios by adapter, the failures in one line each,
 // and the versions.
-import { ADAPTERS, type Adapter, type Outcome, SCENARIOS, type Status } from "./scenarios.ts";
+import { ADAPTERS, type Adapter, SCENARIOS } from "./catalogue.ts";
+import type { Outcome, Status } from "./check.ts";
 
 const MARK: Record<Status, string> = { passed: "✅", failed: "❌", error: "⚠️", skipped: "⏭" };
 

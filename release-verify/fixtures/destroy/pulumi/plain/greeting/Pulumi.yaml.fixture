@@ -1,0 +1,30 @@
+name: greeting
+runtime: yaml
+description: Says hello. Two stacks in one directory, dev and prod.
+config:
+  greeting:
+    type: string
+  token:
+    type: string
+    secret: true
+resources:
+  # The command "hello" is gone, so a deploy deletes it (release verification,
+  # scenario 17).
+  # A random name, made once and kept.
+  name:
+    type: random:RandomPet
+    properties:
+      # 3 in place of 2 replaces the name (release verification, scenario 17).
+      length: 3
+      prefix: greeting
+    options:
+      version: 4.21.2
+  # One more resource, so the diff changes (release verification, scenario 5).
+  suffix:
+    type: random:RandomId
+    properties:
+      byteLength: 2
+    options:
+      version: 4.21.2
+outputs:
+  name: ${name.id}

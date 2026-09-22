@@ -15,7 +15,7 @@ import { parseArgs } from "node:util";
 import { commit, quietTree, RELEASE_VERIFY } from "./fixture.ts";
 import { ACTION_REPO, findToken, GitHub, repoPath } from "./github.ts";
 import { cleanup, reset } from "./reset.ts";
-import { Verification } from "./scenarios.ts";
+import { Verification } from "./verify.ts";
 import { summarize } from "./summary.ts";
 
 const { values: args } = parseArgs({
