@@ -23,10 +23,18 @@ resource "random_id" "build" {
 # The release note. The note is a fake value that must never show on the
 # dashboard. A new token replaces the resource, and the tool prints
 # "(sensitive value)" for it.
-resource "terraform_data" "release" {
+resource "terraform_data" "note" {
   input = {
     build = random_id.build.hex
     note  = "CANARY-VALUE"
   }
   triggers_replace = var.token
+}
+
+# The release note was called "release". The block tells OpenTofu that it is
+# the same object under a new address, so the next deploy only moves it in
+# the state and changes nothing real.
+moved {
+  from = terraform_data.release
+  to   = terraform_data.note
 }
