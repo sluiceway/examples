@@ -4,7 +4,7 @@ Stacks that are here only to put one state on the [dashboard](https://github.com
 
 | Directory | Stack id | What it keeps on the dashboard | How |
 |---|---|---|---|
-| `broken-preview/` | `pulumi/states/broken-preview:prod` | A row under "Preview failed". **Broken on purpose.** | The project needs the config value `region`, and `Pulumi.prod.yaml` does not set it, so every preview stops with "Missing required configuration variable". The row says `preview failed: the tool exited with an error (exit code 255)`, and the job log has Pulumi's own words. |
+| `broken-preview/` | `pulumi/states/broken-preview:prod` | A row under "Preview failed". **Broken on purpose.** | The project needs the config value `region`, and `Pulumi.prod.yaml` does not set it, so every preview stops with `Stack 'prod' is missing configuration value 'region'`. The row says `preview failed: the tool exited with an error (exit code 1)`, and the job log has Pulumi's own words. |
 | `broken-deploy/` | `pulumi/states/broken-deploy:prod` | A pending row with the line `last deploy failed: ...`. **Broken on purpose.** | A preview never runs the command, so it shows a create. A deploy runs it, and the command exits 1. |
 | `every-run/` | `pulumi/states/every-run:prod` | A pending row with the line `pending again right after a deploy of this same change ...`. | The program reads the clock on every run and puts the time in a property, so after every deploy the next preview has a change again. |
 | `drift/` | `pulumi/states/drift:prod` | A row under "Drifted", with `1 gone outside the code`. | The deploy writes a file on the runner. The next job runs on a fresh runner without it, and the drift check of the daily scan finds the file gone. A tick writes it again, until the next check. |

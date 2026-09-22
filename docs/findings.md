@@ -103,3 +103,23 @@ At `e574d67` (0.8.0):
 - The workflow of step 2 installs only the Pulumi CLI (`README.md:271`, `README.md:309`), and the table of `docs/example-workflows.md:5-9` has no OpenTofu workflow. How to install `tofu` is in `docs/credentials.md:152-159`, under credentials.
 - `docs/credentials.md:161` names `TF_PLUGIN_CACHE_DIR` "to download providers once per job". Across runs it needs a cache as well, as the monorepo example does for Pulumi's plugins, and nothing shows one. This repo keys one on the `.terraform.lock.hcl` files.
 - `examples/opentofu-basic/.gitignore:3` ignores `.terraform.lock.hcl`. OpenTofu's docs ask for the lock file to be committed, so that every init installs the same provider versions. A repo that copies the example has none, and a cache keyed on the lock files has nothing to hash. This repo commits its lock files, with the hashes of the common platforms.
+
+## 2026-09-22: a job started by an issue edit cannot write the Actions cache
+
+Not a bug of the action, but a trap next to it that its docs could name. Every deploy from a tick runs in the `apply` job of a workflow run that the `issues` event started. In such a run GitHub hands the cache a token that can only read. `actions/cache/save` then fails with a warning, not an error, and the job stays green:
+
+```
+Failed to save: Unable to reserve cache with key state-35717827772-1-opentofu/site:dev. More details: cache write denied: token has no writable scopes
+```
+
+This repo kept its state in the Actions cache (#2), saved by `apply`. From the first tick on 2026-09-22 ([run 35717827772](https://github.com/sluiceway/examples/actions/runs/35717827772)) to the twelfth, every deploy started from an empty state and saved nothing. The deployment records ended as `success`, and `apply` drew each row as in sync, so the dashboard looked right. Only the scan of the next run, [run 35720559185](https://github.com/sluiceway/examples/actions/runs/35720559185), showed 13 stacks as new again. That run was started by `workflow_dispatch`, which can write the cache, so its one deploy (`pulumi/monorepo/apps/web:prod`) was the only state that survived. This repo now keeps the state as a workflow artifact ([`state.sh`](../.github/scripts/state.sh)), which such a job can upload.
+
+In the action at `d02f17d` (0.9.0), `examples/workflows/node-monorepo.yml:95` already has `actions/cache/restore@v6`, and no save, in `apply`, and `setup-node`'s own `cache: npm` only warns there. So the examples are right, but nothing says why, and a user who adds a save to `apply` (for a plugin cache, a plan or a local state) learns it from a warning in a green job. A sentence in `docs/example-workflows.md` or `docs/credentials.md` would do: a job that an issue edit starts, which is every `resolve`, `apply` and `settle`, can read the Actions cache and cannot write it.
+
+## 2026-09-22: the check of 0.8.0 does not list `dependsOn`
+
+At `e574d67` (0.8.0), the check's line per stack (`src/render/check.ts:30-33`) names the environment, the tick rule and the inputs, and not what the stack depends on. The check of [#12](https://github.com/sluiceway/examples/pull/12) ([run 35717332657](https://github.com/sluiceway/examples/actions/runs/35717332657)) printed `pulumi/monorepo/apps/web:prod: environment sluiceway, tickers write, inputs pulumi/monorepo/packages/naming/**` for a stack with `dependsOn: [pulumi/monorepo/apps/api:prod]`. `a01f805` adds it, and it is released in 0.9.0, which `@v0` runs since 2026-09-22 11:16 UTC. So this entry is closed.
+
+## 2026-09-22: a failed Pulumi command exits 1 on the runner
+
+Not the action's doing. `pulumi/states/broken-preview` and `broken-deploy` fail on purpose, and their rows read `the tool exited with an error (exit code 1)` ([run 35717667788](https://github.com/sluiceway/examples/actions/runs/35717667788), [run 35720086540](https://github.com/sluiceway/examples/actions/runs/35720086540)). The same programs exit 255 with Pulumi v3.198.0 on a laptop. The workflow installs `^3.229.0`, which exits 1. The row gives the code as the tool gave it, which is what record 0022 asks for, so a reader should not rely on one number across Pulumi versions.

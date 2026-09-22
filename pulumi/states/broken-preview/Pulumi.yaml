@@ -5,7 +5,7 @@ description: >-
   set, so every preview fails. It keeps a preview failure on the dashboard.
 config:
   # Required, and Pulumi.prod.yaml does not set it on purpose. Every preview
-  # stops here with "Missing required configuration variable".
+  # stops here with "Stack 'prod' is missing configuration value 'region'".
   region:
     type: string
   token:

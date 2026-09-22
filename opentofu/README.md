@@ -54,14 +54,14 @@ Sluiceway never passes an argument of your choice to `tofu`. The named options a
 
 The state lives in OpenTofu's local backend, next to each module: `notes/terraform.tfstate` for the default workspace, and `site/terraform.tfstate.d/dev/terraform.tfstate` and `site/terraform.tfstate.d/prod/terraform.tfstate` for the two workspaces of `site/`. Git ignores these files.
 
-On the runner that directory is gone after every job, so the workflow keeps the state in the GitHub Actions cache, in the same entry as Pulumi's file backend. **This is a stand-in for a real backend**, not part of a normal install:
+On the runner that directory is gone after every job, so the workflow keeps the state in a workflow artifact, together with Pulumi's file backend. **This is a stand-in for a real backend**, not part of a normal install:
 
-- `apply` restores the newest state, deploys one stack and saves the state under a key of its own, also after a failed deploy.
-- The scan restores the newest state and never saves one.
+- `apply` restores the newest state, deploys one stack and saves the state as an artifact of its own, also after a failed deploy.
+- The scan restores the newest state, and saves it again only when the newest is 30 days old, before it expires.
 - Deploys run one at a time, across stacks and across runs, so two deploys never start from the same state and none is lost.
 - A workspace that the local backend does not hold yet is not an error: the plan shows every resource as a create, and the first deploy makes the workspace.
 
-No step moves the state around: the cache puts the files back where `tofu` looks for them. A real repo uses a remote backend, such as an S3 bucket or a Postgres database, configured in a `backend` block and in the environment. Its credentials are loaded in the steps before Sluiceway, as for any tool ([credentials](https://github.com/sluiceway/sluiceway/blob/main/docs/credentials.md#opentofu)).
+[`state.sh`](../.github/scripts/state.sh) puts the files back where `tofu` looks for them, so no other step moves the state around. A real repo uses a remote backend, such as an S3 bucket or a Postgres database, configured in a `backend` block and in the environment. Its credentials are loaded in the steps before Sluiceway, as for any tool ([credentials](https://github.com/sluiceway/sluiceway/blob/main/docs/credentials.md#opentofu)).
 
 ## Two strings that must never show up
 
