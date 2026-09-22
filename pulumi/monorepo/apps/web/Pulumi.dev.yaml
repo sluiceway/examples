@@ -1,0 +1,5 @@
+encryptionsalt: v1:bVm9+P8srww=:v1:BpiDAO72ihL8FUwb:2gDsX5htRRNzmSm77vfbB80zV0e6Lg==
+config:
+  monorepo-web:title: Example site (dev)
+  monorepo-web:token:
+    secure: v1:BQ8crymB68pbnnZ1:JTW7ud2jQqR9I0Uj01+ANKNvecp5Rcr3qEgPJB8=

@@ -1,7 +1,9 @@
 # The whole Sluiceway workflow of the action's README, with its four jobs, on
 # hosted runners. Everything the tool needs is set up in the steps before the
-# Sluiceway step. The steps marked "Pulumi" are Pulumi's. Steps for OpenTofu
-# and Terraform will sit next to them once the action supports those tools.
+# Sluiceway step. The steps marked "Pulumi" are Pulumi's. The steps marked
+# "Monorepo" install the npm workspaces at the repo root, for the TypeScript
+# programs in pulumi/monorepo. Steps for OpenTofu and Terraform will sit next
+# to them once the action supports those tools.
 #
 # Nothing here is a secret. The only token is the workflow's own GITHUB_TOKEN.
 name: deploy-dashboard
@@ -37,15 +39,27 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # Monorepo: one install at the root for every TypeScript program and
+      # shared package, not one per stack. It runs before the steps that set
+      # up the state, so the install scripts of the dependencies never see
+      # the backend. The passphrase on the job is public, so it may.
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+
       # Pulumi: the CLI. Without a command this action only installs it.
       - uses: pulumi/actions@v7
         with:
           pulumi-version: ^3.229.0
       # Pulumi: the providers the programs use. The first run fills the cache.
+      # The YAML programs name their providers in Pulumi.yaml, the TypeScript
+      # ones in the lockfile, so the key covers both.
       - uses: actions/cache@v6
         with:
           path: ~/.pulumi/plugins
-          key: pulumi-plugins-${{ runner.os }}-${{ hashFiles('pulumi/**/Pulumi.yaml') }}
+          key: pulumi-plugins-${{ runner.os }}-${{ hashFiles('pulumi/**/Pulumi.yaml', 'package-lock.json') }}
 
       # Stand-in for a real state backend (a bucket, Pulumi Cloud), not part
       # of a normal install. The state is a directory on the runner, kept
@@ -115,6 +129,13 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # Monorepo: the one install, as in the scan job.
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+
       # Pulumi: the CLI and the providers, as in the scan job.
       - uses: pulumi/actions@v7
         with:
@@ -122,7 +143,7 @@ jobs:
       - uses: actions/cache/restore@v6
         with:
           path: ~/.pulumi/plugins
-          key: pulumi-plugins-${{ runner.os }}-${{ hashFiles('pulumi/**/Pulumi.yaml') }}
+          key: pulumi-plugins-${{ runner.os }}-${{ hashFiles('pulumi/**/Pulumi.yaml', 'package-lock.json') }}
 
       # Stand-in for a real state backend, as in the scan job.
       - name: Use the file backend (stand-in)

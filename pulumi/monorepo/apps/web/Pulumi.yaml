@@ -1,0 +1,8 @@
+# The project name has to be unique in this repo: the file backend keeps
+# stacks per project name.
+name: monorepo-web
+runtime:
+  name: nodejs
+  options:
+    packagemanager: npm
+description: Makes a random site name with the shared naming rule. Two stacks, dev and prod.

@@ -1,0 +1,13 @@
+{
+  "name": "sluiceway-examples",
+  "private": true,
+  "description": "The one npm install of this repo. Every TypeScript program and shared package is a workspace of it.",
+  "workspaces": [
+    "pulumi/monorepo/apps/*",
+    "pulumi/monorepo/packages/*"
+  ],
+  "devDependencies": {
+    "@types/node": "24.13.6",
+    "typescript": "5.9.3"
+  }
+}
