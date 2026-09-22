@@ -59,3 +59,9 @@ Both are Pulumi's and TypeScript's, not Sluiceway's. But a user who copies the e
 ## 2026-09-22: two rows numbered 21 in the onboarding log
 
 At `69dae83` (0.5.0, what `@v0` runs now), `docs/onboarding-log.md:50` and `docs/onboarding-log.md:53` are both hurdle 21 (a stack pending again after a deploy, and the `actions/cache@v4` warning), and the second one comes after 22 and 23. A link or a mention of "hurdle 21" is ambiguous.
+
+## 2026-09-22: the check's hint next to a root lockfile
+
+At `69dae83` (0.5.0), the check of [pull request #6](https://github.com/sluiceway/examples/pull/6) ([run 35707214886](https://github.com/sluiceway/examples/actions/runs/35707214886)) lists four files that no stack claims: `.nvmrc`, `package-lock.json`, `package.json` and `sluiceway.yaml`. Under them it prints the same hint as before (`src/render/check.ts:18`, logged at `src/modes/check.ts:84`): "A file that no stack reads can be listed under scan.unrelated."
+
+For the three npm files that is the finding about `sluiceway.yaml` again, with more files. `docs/configuration.md:248` says to keep lockfiles and package manifests off the list, so that a change to one previews every stack. The check's ready-to-paste block is right and offers none of them. Only the hint reads as an invitation. A monorepo with a root lockfile will always see it.
