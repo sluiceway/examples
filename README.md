@@ -24,6 +24,10 @@ Sluiceway runs one dashboard per repo, with its settings at the repo root. So ev
 - [`deploy-dashboard-check.yml`](.github/workflows/deploy-dashboard-check.yml) runs Sluiceway's `check` mode on every pull request: it reads the files and lists the stacks it finds, with no credentials and no tool.
 - [`deploy-dashboard.yml`](.github/workflows/deploy-dashboard.yml) is the whole loop of the action's README, with its four jobs: `scan` after every push to `main`, once a day and on "Run workflow"; `resolve`, `apply` and `settle` when someone ticks a box. The steps marked "stand-in" keep the state in the Actions cache in place of a real backend, and are not part of a normal install. The steps marked "Pulumi" and "OpenTofu" install each tool and its providers. The steps marked "Monorepo" run the one `npm ci` at the root for the TypeScript programs. The steps "Load the environment" load an env file of secret references for `pulumi/secret-manager`, the scan one file and `apply` another, through a stand-in for a secret manager's `run` command that resolves fake references to fake values.
 
+## What you see on the dashboard
+
+The dashboard is meant to show every state and line the action can draw, from real runs: stacks deployed and in sync, a failed deploy, a preview that fails on purpose, a delete waiting for a tick, a stack left out with a reason, and more. [`docs/showcase.md`](docs/showcase.md) lists each one, the word the action's glossary uses for it, and what in this repo makes it show.
+
 ## The stack that stays pending
 
 `pulumi/plain/release:prod` is kept pending on purpose. Its program is in the repo and it is never deployed, so the dashboard always has a pending row with a box, a preview page and a diff for a visitor to open. Please do not tick it.
