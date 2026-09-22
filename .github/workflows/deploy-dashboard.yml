@@ -1,0 +1,157 @@
+# The whole Sluiceway workflow of the action's README, with its four jobs, on
+# hosted runners. Everything the tool needs is set up in the steps before the
+# Sluiceway step. The steps marked "Pulumi" are Pulumi's. Steps for OpenTofu
+# and Terraform will sit next to them once the action supports those tools.
+#
+# Nothing here is a secret. The only token is the workflow's own GITHUB_TOKEN.
+name: deploy-dashboard
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "0 6 * * *" # the daily full scan is part of the design
+  workflow_dispatch:
+  issues:
+    types: [edited]
+
+# This block is everything Sluiceway can do in this repo.
+permissions:
+  contents: read
+  issues: write
+  deployments: write
+  actions: write
+  pull-requests: read
+  checks: write
+
+jobs:
+  scan:
+    if: github.event_name != 'issues'
+    runs-on: ubuntu-latest
+    concurrency: sluiceway-scan
+    env:
+      # Pulumi: the passphrase that encrypts the stack secrets. It is public on
+      # purpose and protects nothing: every secret in this repo is fake. A real
+      # repo keeps its passphrase in a secret, or uses a secrets provider.
+      PULUMI_CONFIG_PASSPHRASE: sluiceway-examples
+    steps:
+      - uses: actions/checkout@v7
+
+      # Pulumi: the CLI. Without a command this action only installs it.
+      - uses: pulumi/actions@v7
+        with:
+          pulumi-version: ^3.229.0
+      # Pulumi: the providers the programs use. The first run fills the cache.
+      - uses: actions/cache@v6
+        with:
+          path: ~/.pulumi/plugins
+          key: pulumi-plugins-${{ runner.os }}-${{ hashFiles('pulumi/**/Pulumi.yaml') }}
+
+      # Stand-in for a real state backend (a bucket, Pulumi Cloud), not part
+      # of a normal install. The state is a directory on the runner, kept
+      # between runs in the Actions cache. The scan takes the newest state
+      # that a deploy saved and never saves one itself.
+      - name: Use the file backend (stand-in)
+        run: echo "PULUMI_BACKEND_URL=file://$RUNNER_TEMP/pulumi-state" >> "$GITHUB_ENV"
+      - uses: actions/cache/restore@v6
+        with:
+          path: ${{ runner.temp }}/pulumi-state
+          key: pulumi-state-${{ github.run_id }}
+          restore-keys: pulumi-state-
+      # Stand-in too: a fresh cache has no stacks, and a stack config file
+      # with no stack in the backend is a red row. A real backend already has
+      # every stack, so a normal install has no such step.
+      - name: Create the missing stacks (stand-in)
+        run: .github/scripts/create-missing-stacks.sh
+
+      - uses: sluiceway/sluiceway@v0
+        with:
+          mode: scan
+
+  resolve:
+    if: github.event_name == 'issues' && contains(github.event.issue.labels.*.name, 'sluiceway')
+    runs-on: ubuntu-latest
+    concurrency: sluiceway-resolve
+    outputs:
+      matrix: ${{ steps.resolve.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v7
+      # No tool and no credentials in this job. It never runs the tool.
+      - id: resolve
+        uses: sluiceway/sluiceway@v0
+        with:
+          mode: resolve
+
+  apply:
+    needs: resolve
+    if: ${{ !cancelled() && needs.resolve.outputs.matrix != '' && needs.resolve.outputs.matrix != '[]' }}
+    strategy:
+      fail-fast: false
+      # Stand-in for a real backend: every stack shares the one state
+      # directory in the cache. Two deploys at once would restore the same
+      # state and the one that saves last would drop the other's deploy. So
+      # the deploys of one run go one at a time, and the concurrency group
+      # below does the same across runs. A real backend locks each stack on
+      # its own, and there the README's group per stack is the right one.
+      max-parallel: 1
+      matrix:
+        include: ${{ fromJson(needs.resolve.outputs.matrix) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    concurrency:
+      group: sluiceway-apply
+      queue: max
+    # The environment is only a label here: it holds no secrets. A real repo
+    # keeps the credentials that change things in it.
+    environment:
+      name: ${{ matrix.environment }}
+      deployment: false # Sluiceway already records the deploy
+    env:
+      # Pulumi: public on purpose, as in the scan job.
+      PULUMI_CONFIG_PASSPHRASE: sluiceway-examples
+    steps:
+      - uses: actions/checkout@v7
+
+      # Pulumi: the CLI and the providers, as in the scan job.
+      - uses: pulumi/actions@v7
+        with:
+          pulumi-version: ^3.229.0
+      - uses: actions/cache/restore@v6
+        with:
+          path: ~/.pulumi/plugins
+          key: pulumi-plugins-${{ runner.os }}-${{ hashFiles('pulumi/**/Pulumi.yaml') }}
+
+      # Stand-in for a real state backend, as in the scan job.
+      - name: Use the file backend (stand-in)
+        run: echo "PULUMI_BACKEND_URL=file://$RUNNER_TEMP/pulumi-state" >> "$GITHUB_ENV"
+      - uses: actions/cache/restore@v6
+        with:
+          path: ${{ runner.temp }}/pulumi-state
+          key: pulumi-state-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.stack }}
+          restore-keys: pulumi-state-
+      - name: Create the missing stacks (stand-in)
+        run: .github/scripts/create-missing-stacks.sh
+
+      - uses: sluiceway/sluiceway@v0
+        with:
+          mode: apply
+          deployment-id: ${{ matrix.deployment }}
+
+      # Stand-in: save the state under a key of its own, also after a failed
+      # deploy, because a deploy that stopped halfway still changed the state.
+      # The next scan and the next deploy restore the newest one.
+      - uses: actions/cache/save@v6
+        if: always()
+        with:
+          path: ${{ runner.temp }}/pulumi-state
+          key: pulumi-state-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.stack }}
+
+  settle:
+    needs: [resolve, apply]
+    if: always() && needs.resolve.outputs.matrix != '' && needs.resolve.outputs.matrix != '[]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: sluiceway/sluiceway@v0
+        with:
+          mode: settle
