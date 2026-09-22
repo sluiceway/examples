@@ -29,3 +29,11 @@ This repo is laid out per tool (`pulumi/`, and later `opentofu/`, `terraform/`) 
 - **Stack ids when two tools share a directory.** A stack id is `<path>:<name>` (record 0006). A directory with both a `Pulumi.yaml` and `.tf` files would give two stacks that can have the same id.
 
 This repo avoids the third one by keeping each tool in a directory of its own.
+
+## 2026-09-22: the first dashboard
+
+At `c87ff19` (0.4.0), the first scan that Sluiceway ran here ([run 35705995919](https://github.com/sluiceway/examples/actions/runs/35705995919)) created [issue #4](https://github.com/sluiceway/examples/issues/4). The issue has the label `sluiceway` and is pinned, and the header pictures of `v0.4.0` load. It shows three pending rows, one per stack, and each row's preview page opens logged out. `CANARY-VALUE` and `CANARY-SECRET` appear nowhere in the issue or on the pages, and `CANARY-VALUE` is in the job log, as `scan.logDiff` says it would be. Three rough edges:
+
+- **The root stack resource counts as a create.** On a stack that was never deployed, every row counts `pulumi:pulumi:Stack` as a change: `pulumi/plain/greeting:dev` reads "3 creates" for a program with two resources, and the row and the preview page list `create pulumi:pulumi:Stack greeting-dev`. `src/adapters/pulumi/fold.ts:8-10` drops the root stack resource only when its step is `same`. The row is still correct about what the tool does, but a reader counts the resources in the program and gets a different number.
+- **The job log says "Created the dashboard", and the README's table only knows "Wrote the dashboard".** `src/modes/scan.ts:1042` has the line for a new dashboard, and `README.md:479` ("Reading the job log") lists only `Wrote the dashboard: <url> (41,210 of 65,536 characters).` A first user who looks for the line the README names does not find it.
+- **A deprecation warning from the GitHub API client lands in the job log**, just before the dashboard line: `[@octokit/request] "POST https://api.github.com/repos/sluiceway/examples/issues" is deprecated. It is scheduled to be removed on Fri, 10 Mar 2028`. It comes from `octokit.rest.issues.create` in `src/github/octokit-port.ts:106`. It does no harm today, but it is not one of Sluiceway's fixed lines, and the call it names stops working in 2028.

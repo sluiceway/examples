@@ -4,7 +4,7 @@
 
 This repo has Sluiceway installed once, the way a real repo would: one workflow, one [`sluiceway.yaml`](sluiceway.yaml), one dashboard issue, on GitHub hosted runners. Every stack in it really deploys, and none of them needs a cloud account or a credential. The action's [README](https://github.com/sluiceway/sluiceway#readme) and [docs](https://github.com/sluiceway/sluiceway/tree/main/docs) explain every part.
 
-**The dashboard:** it goes live in the next pull request.
+**The dashboard:** [issue #4](https://github.com/sluiceway/examples/issues/4), pinned at the top of the issues.
 
 ## What is where
 
