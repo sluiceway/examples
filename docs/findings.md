@@ -20,15 +20,15 @@ At `c87ff19` (0.4.0, what `@v0` ran), the check of this repo's first pull reques
 
 The suggested block itself is right: it never offers a glob for `sluiceway.yaml`. Only the list and the hint next to it disagree with the docs. This repo leaves `sluiceway.yaml` off the list, as the docs say.
 
-## 2026-09-22: open question, several tools under one dashboard
+## 2026-09-22: several tools under one dashboard (was an open question)
 
-This repo is laid out per tool (`pulumi/`, and later `opentofu/`, `terraform/`) so that one dashboard can show them all once the action supports them. Nothing in the action decides yet how that works. `docs/later.md:13` plans one next adapter, "OpenTofu and Terraform adapter", and no record says how several adapters share one repo. Open:
+This repo is laid out per tool (`pulumi/`, `opentofu/`, and later `terraform/`) so that one dashboard can show them all. When this entry was written, nothing in the action decided how several tools share one repo. Since 0.5.0 [record 0053](https://github.com/sluiceway/sluiceway/blob/main/docs/adr/0053-opentofu-stacks-are-declared-planned-once-and-deployed-from-the-saved-plan.md) does, and at `e574d67` (0.8.0, what `@v0` runs now) the three questions have these answers:
 
-- **Discovery across adapters.** Whether one scan runs the discovery of every adapter over the same checkout, or a repo picks one tool.
-- **Which tool a row belongs to.** A row, its preview page and its deployment record say nothing about the tool today, and `apply` has to know which adapter to hand a stack to.
-- **Stack ids when two tools share a directory.** A stack id is `<path>:<name>` (record 0006). A directory with both a `Pulumi.yaml` and `.tf` files would give two stacks that can have the same id.
+- **Discovery across adapters.** One scan runs the discovery of both tools over the same checkout (`src/adapters/discover-all.ts:17-33`). Pulumi stacks come from their files, as before. OpenTofu stacks come only from `stacks` entries with `tool: opentofu`: files alone never make one.
+- **Which tool a row belongs to.** The tool rides in the stack's options bag, which only the adapters read, and one adapter hands each stack to the adapter of its tool (`src/adapters/tools.ts:17-19`). A stack without a tool is a Pulumi stack. The row itself still names no tool.
+- **Stack ids when two tools share a directory.** Two stacks with the same id stop every mode, with "two stacks have the id ...", whichever tools they belong to (`src/core/discovery.ts:28-39`). A Pulumi stack `prod` and an OpenTofu entry named `prod` in one directory are refused, not merged. One rough edge: the message does not say which tool each stack belongs to. Tried locally with the check of `e574d67` on a directory `app` with `Pulumi.dev.yaml`, a `main.tf` and an entry `path: app, name: dev, tool: opentofu`, it reads `two stacks have the id "app:dev": "dev" in "app", and "dev" in "app".` The two halves are the same words, because `describe` in `src/core/discovery.ts:42-47` writes only the name and the path.
 
-This repo avoids the third one by keeping each tool in a directory of its own.
+This repo still keeps each tool in a directory of its own, so the stacks of two tools never share a directory or an id. [`opentofu/`](../opentofu/) has the OpenTofu stacks.
 
 ## 2026-09-22: the first dashboard
 
@@ -79,3 +79,27 @@ At `69dae83` (0.5.0, what `@v0` ran), the push scan of the merge of #6 ([run 357
 At `3d059af` (0.6.0, what `@v0` runs now), `examples/workflows/secret-manager.yml:40-46` puts the loading step ("Load the environment") right after the Pulumi CLI, and the workflow has no install step. `docs/credentials.md:143` says "The values written to `$GITHUB_ENV` reach every later step of the job", and stops there. For GitHub secrets the same page draws the consequence (`docs/credentials.md:38`: put the secrets on Sluiceway's step, "so that the other steps of the job, such as the install scripts of your package manager, never see them"), and `examples/workflows/node-monorepo.yml:48-50` says it again. For an env file of references nobody says it: a repo that combines the monorepo example with the secret manager example can put `npm ci` after the loading step, and then every install script sees the credentials.
 
 This repo puts "Load the environment" last, right before Sluiceway, after `npm ci` and the stand-in steps, and says why in a comment.
+
+## 2026-09-22: the check does not show what an OpenTofu entry declares
+
+At `e574d67` (0.8.0, what `@v0` runs now), the check of [pull request #10](https://github.com/sluiceway/examples/pull/10) ([run 35710344474](https://github.com/sluiceway/examples/actions/runs/35710344474)) lists the three OpenTofu stacks of [`opentofu/`](../opentofu/) with the same line as a Pulumi stack, for example `opentofu/site:dev: environment sluiceway, tickers write, no inputs`. The line is built in `src/render/check.ts:29-33` from the environment, the tickers and the inputs only. It names neither the tool, nor the workspace, nor the var files.
+
+Record 0053 says only that the check "lists OpenTofu stacks as it lists Pulumi stacks", so this is what the record asks for. But for OpenTofu the entry is the whole declaration: a wrong `workspace` (`prod` in the entry of `dev`) or a var file of the other stack passes the check, and shows only in a scan, as a row of all creates or the wrong diff. The check is the one place a reviewer of the pull request could see it.
+
+## 2026-09-22: `terraform_data` prints a sensitive value in the tool's own diff, and the security page names only Pulumi's mask
+
+At `e574d67` (0.8.0), `docs/security.md:89` says what masks a secret in the tool's own diff (`scan.logDiff`): "the tool's own `[secret]` for a value it holds as secret". `[secret]` is Pulumi's word. OpenTofu prints `(sensitive value)`, and it has two cases that page does not name:
+
+- **`terraform_data` drops the mark on its output.** Tried locally with `tofu` 1.12.6: a sensitive variable in `input` shows as `(sensitive value)` there, but `output` holds a copy without the mark, and the plan of the next change prints the old value in plain text: `- token = "CANARY-SECRET"`. Record 0053 says so under Consequences (the recording `log-diff-changed-secret`), and nothing a user reads does: not `docs/security.md`, not `docs/configuration.md` under `scan.logDiff`, not `docs/credentials.md`.
+- **A provider can print a hash of a sensitive value.** `local_sensitive_file` marks its `content`, and the plan of a new content prints `content_md5`, `content_sha1`, `content_sha256` and `content_sha512` of it. A hash of a short secret is as good as the secret. `docs/security.md:78` covers "a secret the tool prints in another shape, base64 or with escaped newlines", which comes close, but names no hash.
+
+Neither is Sluiceway's doing: both are what `tofu plan` prints, and the dashboard, the pages and the summary hold none of it. This repo puts the fake token in `triggers_replace` of a `terraform_data`, which keeps the mark, and uses no `local_sensitive_file`.
+
+## 2026-09-22: the README's setup is Pulumi only, and no example workflow has OpenTofu
+
+At `e574d67` (0.8.0):
+
+- `README.md:410`, step 3 "Tell it about your stacks", starts with "Optional. Without `sluiceway.yaml` every stack that discovery finds gets a row". For OpenTofu the file is not optional: without an entry an OpenTofu stack has no row. The step does not say so, and its example file has no `tool: opentofu` entry. The fact is in `README.md:140` ("What it does not do yet") and in `docs/configuration.md`.
+- The workflow of step 2 installs only the Pulumi CLI (`README.md:271`, `README.md:309`), and the table of `docs/example-workflows.md:5-9` has no OpenTofu workflow. How to install `tofu` is in `docs/credentials.md:152-159`, under credentials.
+- `docs/credentials.md:161` names `TF_PLUGIN_CACHE_DIR` "to download providers once per job". Across runs it needs a cache as well, as the monorepo example does for Pulumi's plugins, and nothing shows one. This repo keys one on the `.terraform.lock.hcl` files.
+- `examples/opentofu-basic/.gitignore:3` ignores `.terraform.lock.hcl`. OpenTofu's docs ask for the lock file to be committed, so that every init installs the same provider versions. A repo that copies the example has none, and a cache keyed on the lock files has nothing to hash. This repo commits its lock files, with the hashes of the common platforms.
