@@ -144,3 +144,134 @@ For the action this means that a repo which wants to test its own dashboard end 
 ## 2026-09-22: the Octokit deprecation warning is still in every scan of 0.22.0
 
 The entries on the first dashboard and on the first scan with pulumi/monorepo name it for 0.4.0 and 0.5.0. At `f99a0f7` (0.22.0) the first release verification ([run 35756208071](https://github.com/sluiceway/release-verify/actions/runs/35756208071) on the test bed) still logs `[@octokit/request] "POST https://api.github.com/repos/sluiceway/release-verify/issues" is deprecated. It is scheduled to be removed on Fri, 10 Mar 2028`, and every later scan logs the same for `PATCH .../issues/<n>` ([run 35756627209](https://github.com/sluiceway/release-verify/actions/runs/35756627209)). The calls are `octokit.rest.issues.create` and `octokit.rest.issues.update` in `src/github/octokit-port.ts:125` and `:144-162`. It does no harm until 2028, and it is the one line in a clean scan's log that is not Sluiceway's own.
+
+## 2026-09-22: the acceptance checklist, triaged, against v0.26.0
+
+The action's `docs/acceptance.md` at `v0.26.0` has 60 unticked items. Each one is sorted below by what can prove it: a scenario of the [release verification](release-verification.md) that passes today, a scenario that is planned or new, or a person. The checklist is written for one setup, a private repo with self-hosted runners, a real secret manager and a wrapper script around the tool, and a row says so when that setup, not the feature, is what keeps an item off a runner. File and line refer to the action at `v0.26.0`.
+
+"Covered" means a scenario of the driver passed it: scenarios 1 to 5, green against `v0.22.0` in the local run of [#19](https://github.com/sluiceway/examples/pull/19). The test bed runs that run linked were deleted by later resets, and no scenario has run against `v0.26.0` yet, so a covered row holds for `v0.26.0` only once the driver has run against that tag.
+
+### The counts
+
+| Verdict | Items | What it means |
+|---|---|---|
+| Covered | 2 | A scenario that passes today proves the whole item. |
+| Automated | 19 | A planned or new scenario can prove the whole item. No person needed. |
+| Split | 15 | A scenario proves most of it. A person still looks once, usually for a minute or two. |
+| Needs a person | 24 | No runner can prove it. |
+| **Total** | **60** | |
+
+What the system takes over, and what it costs: the 19 automated items and the scenario part of the 15 split ones need 9 new scenarios and new assertions in 7 existing or planned ones (listed under [What the verification has to grow](#what-the-verification-has-to-grow)). That adds about 70 minutes of wall time and about 150 runner minutes to one verification, on top of the 2 hours and 345 runner minutes of the catalogue. Both repos are public, so it costs runner queue time and no money. It needs one more user account, for two tickers at once.
+
+What stays with a person, grouped so each group is one sitting:
+
+1. **Before the first scan, the private repo's setup** (Part 2, all 11): runner version, the tool install, the secret manager account and its token, the one load step and its cost, the job environment, the install and the plugin cache, `sluiceway.yaml`, the `--refresh` difference, the programs that write into their own directory, and the choice of the stack for Part 4. About half a day, most of it setup work rather than testing.
+2. **One full scan of the private repo, read by eye** (items 31 to 35, 37 to 40, 42): trigger it, count the rows, compare five pending and five in sync rows with the wrapper's own preview, search for one real secret, read the size, the timings and the request count, pick `concurrency` and `preview-timeout`, merge one change to one app. About two hours.
+3. **One sitting in a browser, on a desktop and a phone, in both themes** (items 2, 4, 11, 18, 19, 43): look at the header move in light and dark, tick one box by hand, read one scan summary and one re-run summary, open a preview page and note where GitHub lists it, then the whole dashboard on a phone. About 30 minutes.
+4. **One real deploy** (items 45, 46, 47, 49, 51): note the state of three stacks, tick in the browser, check the runner and the token placement, check the change live, check the other two stacks. About an hour.
+5. **Three mornings** (item 44): the scheduled scan is true each day. Five minutes a morning.
+6. **Chores after it passes** (items 55 to 60): settings, installs, names, and a decision. Not tests. About an hour.
+
+### The table
+
+| # | Item | Part | Verdict | Scenario | Asserted, or why a person |
+|---|---|---|---|---|---|
+| 1 | A push gives a dashboard, by `github-actions[bot]`, labelled, pinned | 1 | Covered | 1 (#19) | One open issue with the label, that author and title, pinned (read once through GraphQL). |
+| 2 | Header image shows, moves, follows the theme | 1 | Split | 1, new assertions | Scenario: every image URL is at the tag (covered), the header is a `<picture>` with a `prefers-color-scheme: dark` source (`src/render/body.ts:204-206`), both files load as SVG and hold an `<animate>`. Person: see it move in light and dark. |
+| 3 | A push to one stack's directory previews only that stack | 1 | Covered | 4 (#19) | The result file and the check runs name only the claiming stacks, every other row block is byte for byte the one before. |
+| 4 | A tick in the browser starts a run; `waiting to start`, then `deploying`, `ticked by` | 1 | Split | 6, new assertion | Scenario: the bot's tick starts `resolve`, and the edit history holds a body with `waiting to start` and a later one with `deploying`, both `ticked by` the bot. Person: one tick with a mouse, since the bot ticks through the API. |
+| 5 | Deploy succeeds; in sync, under Recently deployed, record task `sluiceway:<stack id>` | 1 | Automated | 6 (planned) | Record ends `success` with task `sluiceway:<stack id>` (`src/core/deployment.ts:47`), the row is in sync, the trail line names the stack. |
+| 6 | The bot's own edits start no run | 1 | Automated | 6, new assertion | The runs with event `issues` equal the ticks; none has the bot's re-render as its trigger (record 0017). |
+| 7 | Two people tick two rows within seconds; each deploy names its own ticker | 1 | Automated | New: two tickers | Two records, each with its own ticker, each trail line with its login. Needs a second test account. |
+| 8 | A writer ticks a stack whose `tickers` is `admin`; refused with one comment | 1 | Automated | 7 (planned), with `tickers: admin` | The test bot has Write, so it is the refused writer: one comment with the rule (`src/render/refused-ticks.ts:81-82`), box cleared, no record. |
+| 9 | A merge between the tick and `apply`; nothing deploys, row shows the new diff | 1 | Automated | New: moved change | No `success` record, `apply` red, the moved comment (`src/render/moved-comment.ts:19`), the row's failure line `the change moved since the tick`. Needs a pause before `apply`. |
+| 10 | Cancel during `apply`; within a minute the row says the run ended without a result | 1 | Automated | New: cancelled deploy | Cancel through the API, then within 60 s the row reads `the run ended without a result` (`src/core/failure-reason.ts:95`). Needs a deploy that takes minutes. |
+| 11 | "Re-run failed jobs"; nothing deploys, the summary says to tick again | 1 | Split | New: cancelled deploy | Scenario: re-run through the API, no new `success` record, the log line `A re-run never deploys` (`src/modes/apply.ts:242`). Person: the summary, which no API reads. |
+| 12 | Tick the rescan box; a full scan runs and the box is clear | 1 | Automated | New: rescan box | A dispatched run, a full scan in the result file, the rescan box unticked after. |
+| 13 | Close the dashboard; the next scan reopens the same number | 1 | Automated | New: closed dashboard | The same number open again, no second issue, the log line `Reopened the dashboard` (`src/github/dashboard.ts:85-87`). |
+| 14 | `dashboard.redact: true`; no type, name or property name in the issue | 1 | Automated | New: dashboard settings | The body holds none of the fixtures' resource types, names or property paths; the result file still holds them (`docs/notifications.md:115`). |
+| 15 | `dashboard.personality: false`; no image, the dry line | 1 | Automated | New: dashboard settings | No `<picture>` and no mascot URL, and the dry wording of `src/render/voice.ts`. |
+| 16 | A delete shows the plain header, the open `DELETE` line, bold counts | 1 | Automated | 17 (planned) | `⚠️ DELETE` open under the row, bold counts (`src/render/row.ts:166-167`), header with the `-deletes` sign. The plain header is gone since record 0043, see below. |
+| 17 | A resource named `#1 @octocat www.example.com *x*` shows as plain text | 1 | Automated | 1, new fixture | Read the body as GitHub renders it (`application/vnd.github.html+json`) and find no link or mention in that row. Use the bot's login, not `@octocat`, so no real person is notified. |
+| 18 | The scan summary renders; the job log has one group per stack | 1 | Split | 1, new assertion | Scenario: one log group per previewed stack, titled with its id. Person: key caps, folds, the warning sign and the lists of the summary, which no API reads. |
+| 19 | `preview` opens that stack's page; rescan keeps one page; no `checks: write` | 1 | Split | 3 (#19), new: rescan box, new: no checks | Covered: one neutral page per pending row, the row links to it. New: after a rescan still one page per stack; without `checks: write` the rows link to the summary and the log says `No preview page was written` (`src/modes/scan.ts:1135`). Person: which run's jobs list shows the page, and a pull request's checks. |
+| 20 | Runner 2.328.0 or newer, no ARM32 | 2 | Needs a person | | Setup: self-hosted runners. Hosted runners qualify (`docs/reference.md:49`). |
+| 21 | The tool installed by a step, no wrapper | 2 | Needs a person | | Setup: the private repo's workflow. The test bed installs Pulumi by a step already. |
+| 22 | A secret manager account that reads one vault; token per job | 2 | Needs a person | | Setup: a real secret manager. |
+| 23 | One load step, every value masked | 2 | Needs a person | | Setup: a real secret manager. The planned `Ps` adapter of the catalogue proves the masking with fake references (leak check). |
+| 24 | Measure what one load costs against the rate limit | 2 | Needs a person | | Setup: a real secret manager's limits. |
+| 25 | The job environment gives the tool what the wrapper gave it | 2 | Needs a person | | Setup: a real state backend and a cluster. |
+| 26 | Install once at the root, cache the plugins | 2 | Needs a person | | Setup: the private repo's workflow. |
+| 27 | `sluiceway.yaml` with `inputs` and `ignore` | 2 | Needs a person | | Setup: the private repo's own stacks. The features are scenarios 4 and 9. |
+| 28 | The wrapper previews with `--refresh`, Sluiceway does not | 2 | Needs a person | | Setup: a note on where rows differ from the wrapper (record 0015). |
+| 29 | Two programs write into their directory during a preview | 2 | Needs a person | | Setup: two of the private repo's programs. |
+| 30 | Pick the low-risk stack for Part 4 | 2 | Needs a person | | A choice. |
+| 31 | A full scan by hand is green | 3 | Needs a person | | Setup: the private repo on self-hosted runners. The dispatched scan itself is in scenarios 8 and 14. |
+| 32 | Exactly one row per stack; both stacks of a two-file project | 3 | Split | 1 (#19) | Covered: one row per stack and no other, `greeting:dev` and `greeting:prod` of one project. Person: the count on the private repo. |
+| 33 | Five pending rows agree with the wrapper's preview | 3 | Split | 1 (#19) | Covered: each row's state and counts equal what the fixture expects. Person: five rows against the wrapper, which only the private repo has. |
+| 34 | Five in sync rows, and the preview is empty | 3 | Split | 1, 6 | Scenario: a row in sync after a deploy has nothing to deploy. Person: five rows against the wrapper. |
+| 35 | No property value on any row, summary, page or log line | 3 | Split | 20, leak check (planned) | Scenario: the four fake strings, base64 too, in no body, edit, comment, page, record, result file or log. Person: one search for one real secret, which no fixture has. |
+| 36 | Every preview failure links to a log that explains it; fixed reason | 3 | Automated | 18 (planned), new assertion | The fixed reason on the row, and the run it links has a log group for that stack with the tool's error. |
+| 37 | Body under 58,000 characters, or the shortened-rows note with working links | 3 | Split | New: size budget | Scenario: a stack with hundreds of changes, a body at most 65,536 with the note, its links answer 200 (`src/render/budget.ts:49,56`). Person: read the size from the private repo's log line. |
+| 38 | Write down the scan timings | 3 | Needs a person | | Setup: the numbers mean something only on the private repo's runners. |
+| 39 | Set `concurrency` and `preview-timeout` from them | 3 | Needs a person | | Setup: a choice for 1 CPU runners. The defaults are `action.yml:27,33`. |
+| 40 | A merge to one app previews it, and the `inputs` stack with it | 3 | Split | 4 (#19), 4 with `Pm` (planned) | Covered: a change previews only the stacks that claim it. Planned: a claim through `inputs`. Person: one merge on the private repo, to check its own `inputs`. |
+| 41 | A change to the shared package gives a full scan | 3 | Automated | 4, new assertion | A push to a file that no stack claims and `scan.unrelated` does not list gives a full scan, `unclaimed` in the log (`src/core/scan-plan.ts:24`). |
+| 42 | A full scan stays far below 1,000 requests | 3 | Split | 1, new assertion | Scenario: the log ends with `The scan made N requests to the GitHub API.` (`src/modes/scan.ts:274`), N below 1,000. Person: the private repo's number. |
+| 43 | Readable on a phone, in light and dark | 3 | Needs a person | | A phone and both themes. |
+| 44 | Three days of scheduled scans, true every morning | 3 | Needs a person | | Setup: whether the dashboard is true is a question about the private repo's real infrastructure. |
+| 45 | Note the state of the chosen stack and two others | 4 | Split | 6, new assertion | Scenario: the state files of the ticked stack and two others, before and after. Person: the real backend's serials. |
+| 46 | Tick the chosen stack in the browser | 4 | Needs a person | | A browser tick on the private repo. Scenario 6 ticks through the API. |
+| 47 | One `apply`; `resolve` and `settle` on a hosted runner, no tool call | 4 | Split | 6, new assertion | Scenario: `resolve`'s matrix holds one stack, one `apply` job, and the logs of `resolve` and `settle` hold no tool call (`src/modes/resolve-job.ts:2-3`, `src/modes/settle-job.ts:2-3`). Person: the private repo's runners and token. See below: the one-job workflow cannot do this part. |
+| 48 | The row says `deploying`, `ticked by`, box gone | 4 | Automated | 6, new assertion | The edit history holds a body where the row reads `deploying · ticked by <bot>` with no box. |
+| 49 | The deploy succeeds and the change is live | 4 | Needs a person | | Setup: a real cluster, checked by eye. |
+| 50 | In sync; first under Recently deployed; the record carries the commit | 4 | Automated | 6 (planned) | The trail's first line names the stack, the bot and the run; the record's `sha` is the deployed commit. |
+| 51 | The two other stacks were not touched | 4 | Split | 6, new assertion | Scenario: no record for them, their rows and state files as before. Person: the real backend. |
+| 52 | The next full scan changes nothing on the chosen row | 4 | Automated | 6, new assertion | After a dispatched full scan the row block is byte for byte the one before. |
+| 53 | An outside deploy, then rescan; in sync and nothing under Recently deployed | 4 | Automated | 15 (planned) | In sync after the rescan, and a trail line `deployed outside the dashboard` (record 0073). The checklist expects no line, see below. |
+| 54 | A second change is pending again, and names its pull request | 4 | Automated | New: attribution | The bot opens and merges a pull request; the row is pending with `from #N by <bot>`. |
+| 55 | Write the measured numbers into the map's closing comment | after | Needs a person | | A chore. |
+| 56 | Allow Actions to create and approve pull requests | after | Needs a person | | A setting of the action repo. |
+| 57 | Turn on private vulnerability reporting | after | Needs a person | | A setting of the action repo. |
+| 58 | Install the Renovate app on the organization | after | Needs a person | | An install. It also unblocks scenario 16 here. |
+| 59 | Reserve the npm name and the domain | after | Needs a person | | Outside GitHub. |
+| 60 | Decide what comes next from `later.md` | after | Needs a person | | A decision. |
+
+Of the 24 that need a person, 11 are Part 2, 6 are the chores after, and 6 are the private repo's own run (31, 38, 39, 44, 46, 49): they need the setup, not the feature. Only item 43 needs a person whatever the setup, and with it the person parts of the split rows 2, 4, 11, 18 and 19: a phone, both themes, a mouse, and pages no API reads.
+
+### What the verification has to grow
+
+New scenarios, numbered after the catalogue's 20:
+
+| New scenario | Items | What it needs | Wall time |
+|---|---|---|---|
+| 21 Two tickers at once | 7 | A second test user account with Write on the test bed, and its token as a second secret. The one test bot cannot be two people. | 10 min |
+| 22 Moved change | 9 | A pause between `resolve` and `apply`: a step in the test bed's `apply` job that waits for a flag file the driver pushes, or an environment with a wait timer, which only an admin can create once. | 8 min |
+| 23 Cancelled deploy, then re-run | 10, 11 | A fixture stack whose deploy takes a few minutes (a command that sleeps), and the API calls to cancel a run and to re-run its failed jobs. | 10 min |
+| 24 Rescan box | 12, 19 | The bot's tick on the rescan box. Reads the check runs of the commit after the rescan. | 4 min |
+| 25 Closed dashboard | 13 | Closing the issue with the label kept, then a push. | 3 min |
+| 26 Dashboard settings | 14, 15 | Two pushes of `sluiceway.yaml`, redact then personality off, and one that puts both back. | 9 min |
+| 27 Size budget | 37 | A fixture stack with hundreds of resources, for example a Pulumi YAML program with many `random` resources. | 4 min |
+| 28 No preview pages | 19 | A push of the workflow without `checks: write`, and one that puts it back. | 6 min |
+| 29 Attribution | 54 | The bot opens and merges a pull request that changes one deployed stack. Can share its setup with scenario 16. | 4 min |
+
+New assertions in existing or planned scenarios:
+
+- **1**: the header's `<picture>` with a dark source, both files load, the SVG animates (2); one log group per previewed stack (18); the request count line (42); a resource name with `#`, `@`, a web address and `*`, read as rendered HTML (17). The rendered HTML is a header on the same REST call, no new permission.
+- **4**: a file no stack claims gives a full scan (41).
+- **6**: the edit history holds `waiting to start` and `deploying` (4, 48); one `issues` run per tick (6); state files of three stacks before and after (45, 51); no tool call in `resolve` and `settle` (47); a full scan after leaves the row as it was (52).
+- **7**: `tickers: admin` next to the named login (8).
+- **15**: expect the `deployed outside the dashboard` line for Pulumi (53).
+- **17**: expect the header with the `-deletes` sign, not a plain header (16).
+- **18**: the row's run link has a log group that explains the failure (36).
+
+Nothing in this list needs a self-hosted runner, a kind cluster, a real cloud or a real secret manager. Those stay with a person, above.
+
+### What the triage found in the checklist
+
+The checklist was written before some records that `v0.26.0` holds. A person who follows it word for word will meet these:
+
+- **The README's workflow is one job now.** Part 1 asks for "the README's workflow", and at `v0.26.0` that is one job with one step in auto mode (`README.md:141-159`, record 0077). Items 9, 10 and 11 name the `apply` job, and item 47 asks for `resolve` and `settle` on a hosted runner without the secret manager's token. Record 0077 says the one job cannot do that ("Ticks share the runner of scans"), and `docs/workflow.md:152` sends that setup to the split workflow. So Part 4 either runs the split workflow, or item 47 changes. In the one job a cancelled deploy is settled by the post step (`action.yml:149-150`), and a re-run starts `resolve` again, which finds no tick, so whether its summary "says to tick again" (item 11) is not clear from the docs.
+- **The plain header is gone.** Item 16 expects "the plain header" for a delete. Records 0043 and 0075 removed it: the header shows the real state and a delete adds a sign to the same picture (`docs/adr/0043-...md:39`).
+- **An outside deploy is now on the trail.** Item 53 expects nothing under Recently deployed after an outside deploy and cites record 0016. Record 0073 amends 0016 (`docs/adr/0016-...md:3`): a full scan lists a Pulumi deploy made outside the dashboard as `deployed outside the dashboard, from <commit>`. The rescan box starts a full scan, so the line will be there.
+- **The escaping does not touch `#`, `@` or a web address.** Item 17 expects `#1 @octocat www.example.com *x*` as plain text. `src/render/escape.ts:21-22` writes `&<>"` and `` *_`~[]|\ `` as references, so `*x*` stays plain, but `#1`, `@octocat` and `www.example.com` reach GitHub as they are. `docs/later.md:103` expects the live pass to find out. On a public test bed the `@octocat` of the item would notify a real account, so scenario 1 should use the test bot's login.
