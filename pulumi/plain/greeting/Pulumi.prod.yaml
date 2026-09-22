@@ -1,0 +1,5 @@
+encryptionsalt: v1:R+JSDZzAl6Q=:v1:zbBLYquyVZYWboZS:LdAsu5qSwWKpGixrki1UIz0pESLoSA==
+config:
+  greeting:greeting: Good morning
+  greeting:token:
+    secure: v1:gdL3Owij6Y93Lme5:imMWdvAHRw2bNVhiteVDLriVoa4ofCr2FnMWi2M=

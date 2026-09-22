@@ -1,0 +1,33 @@
+name: greeting
+runtime: yaml
+description: Says hello. Two stacks in one directory, dev and prod.
+config:
+  greeting:
+    type: string
+  token:
+    type: string
+    secret: true
+resources:
+  # A random name, made once and kept.
+  name:
+    type: random:RandomPet
+    properties:
+      length: 2
+      prefix: greeting
+    options:
+      version: 4.21.2
+  # Runs `echo` on the runner at deploy time. No cloud, no credentials.
+  hello:
+    type: command:local:Command
+    properties:
+      create: echo "$GREETING from $NAME"
+      environment:
+        GREETING: ${greeting}
+        NAME: ${name.id}
+        # A fake value that must never show on the dashboard.
+        NOTE: CANARY-VALUE
+        TOKEN: ${token}
+    options:
+      version: 1.2.1
+outputs:
+  name: ${name.id}
