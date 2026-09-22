@@ -22,7 +22,7 @@ The showcase dashboard of this repo, [issue #4](https://github.com/sluiceway/exa
 
 1. **Pick the version.** From the trigger (below). The driver resolves the tag `vX.Y.Z` on `sluiceway/sluiceway` to its commit and stops when the tag does not exist.
 2. **Reset the test bed** (next section).
-3. **Build the fixture commit.** The driver copies `release-verify/fixtures/base/` into an empty tree, drops the `.fixture` suffixes, writes the workflow with `uses: sluiceway/sluiceway@vX.Y.Z` (the exact tag, never `@v0`), and makes one commit with no parent, through GitHub's Git Data API: the driver needs no clone and no git credentials.
+3. **Build the fixture commit.** The driver copies `release-verify/fixtures/base/` into an empty tree, drops the `.fixture` suffixes, writes the workflow with `uses: sluiceway/sluiceway@vX.Y.Z` (the exact tag, never `@v0`), and makes one commit with no parent, through GitHub's Git Data API: the driver needs no clone and no git credentials. These commits are not signed, and that is fine on a throwaway test bed that nothing else builds on. Every commit to this repo stays signed.
 4. **Force-push it** to `main` of `sluiceway/release-verify`. That push starts the first scan.
 5. **Run the scenarios in order.** Each one is a push of an overlay from `release-verify/fixtures/<scenario>/`, an edit of the dashboard body, a pull request, or a dispatch of a helper workflow of the test bed, followed by a wait until the test bed is quiet: every run that the step started, and every run those started (settle's dispatch, resolve's dispatch), has ended.
 6. **Assert** on what GitHub holds, after each step and once more at the end (the leak check reads everything).
@@ -255,5 +255,6 @@ The test bed's token calls stay far below GitHub's limits: the driver polls runs
 1. This page, and the bot in [`findings.md`](findings.md).
 2. The driver, the reset and the cleanup, with scenarios 1 to 5 for Pulumi and OpenTofu, green against v0.22.0 on a local run.
    Run it on a laptop as [`release-verify/README.md`](../release-verify/README.md) says.
-3. Then the rest, a few scenarios per pull request, the adapters added as they go: Terraform, Terragrunt and CDK for Terraform, then kind with Helm and kubectl, which first proves the cluster stand-in.
-4. `release-verify.yml` with its triggers, once the bot's token exists. The bug issues stay behind their switch.
+3. Scenarios 6, 7, 17, 18 and 19 for Pulumi and OpenTofu, green against v0.26.0 on a local run, with the owner's login as the ticker.
+4. Then the rest, a few scenarios per pull request, the adapters added as they go: Terraform, Terragrunt and CDK for Terraform, then kind with Helm and kubectl, which first proves the cluster stand-in.
+5. `release-verify.yml` with its triggers, once the bot's token exists. The bug issues stay behind their switch.

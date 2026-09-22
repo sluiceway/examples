@@ -12,9 +12,11 @@ export const ACTION_REPO = `${OWNER}/sluiceway`;
 const API = "https://api.github.com";
 const TEST_BED_PATH = `/repos/${TEST_BED_REPO}/`;
 
-// Reads of the action repo the driver needs: the tag under test, the latest
-// release, and files at the tag.
+// Reads outside the test bed the driver needs: who the token belongs to (the
+// ticker), and of the action repo the tag under test, the latest release and
+// files at the tag.
 const ACTION_READS = [
+  "/user",
   `/repos/${ACTION_REPO}/git/ref/tags/`,
   `/repos/${ACTION_REPO}/releases/latest`,
   `/repos/${ACTION_REPO}/contents/`,
@@ -24,7 +26,9 @@ export class TargetError extends Error {}
 
 function checkTarget(method: string, path: string): void {
   if (path.startsWith(TEST_BED_PATH)) return;
-  if (method === "GET" && ACTION_READS.some((prefix) => path.startsWith(prefix))) return;
+  // An entry that ends in a slash is a prefix, any other one is the path.
+  const read = (entry: string) => (entry.endsWith("/") ? path.startsWith(entry) : path === entry);
+  if (method === "GET" && ACTION_READS.some(read)) return;
   throw new TargetError(`Refused ${method} ${path}: the driver only writes to ${TEST_BED_REPO}.`);
 }
 
@@ -75,7 +79,7 @@ export class GitHub {
     checkTarget(method, path.split("?")[0] ?? path);
     for (let attempt = 1; ; attempt++) {
       this.requests++;
-      const response = await fetch(`${API}${path}`, {
+      const response = await send(`${API}${path}`, {
         method,
         headers: this.headers(body === undefined ? {} : { "content-type": "application/json" }),
         body: body === undefined ? undefined : JSON.stringify(body),
@@ -123,7 +127,7 @@ export class GitHub {
   async download(path: string): Promise<Buffer> {
     checkTarget("GET", path);
     this.requests++;
-    const response = await fetch(`${API}${path}`, { headers: this.headers() });
+    const response = await send(`${API}${path}`, { headers: this.headers() });
     if (!response.ok) throw new Error(`GET ${path}: ${response.status}`);
     return Buffer.from(await response.arrayBuffer());
   }
@@ -142,7 +146,7 @@ export class GitHub {
     }
     const isMutation = /\bmutation\b/.test(query);
     this.requests++;
-    const response = await fetch(`${API}/graphql`, {
+    const response = await send(`${API}/graphql`, {
       method: "POST",
       headers: this.headers({ "content-type": "application/json" }),
       body: JSON.stringify({ query, variables: isMutation ? variables : { ...variables, owner: OWNER, name: TEST_BED } }),
@@ -158,6 +162,20 @@ export class GitHub {
   allowNode(id: string): string {
     this.nodeIds.add(id);
     return id;
+  }
+}
+
+// fetch, tried again up to five times when the network fails before GitHub
+// answers ("fetch failed"). An answer, of any status, is the caller's.
+async function send(url: string, init: RequestInit): Promise<globalThis.Response> {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await fetch(url, init);
+    } catch (error) {
+      const cause = error instanceof Error && error.cause ? ` (${String(error.cause)})` : "";
+      if (attempt >= 5) throw new Error(`${init.method ?? "GET"} ${url}: ${String(error)}${cause} after ${attempt} tries`);
+      await sleep(attempt * 3_000);
+    }
   }
 }
 

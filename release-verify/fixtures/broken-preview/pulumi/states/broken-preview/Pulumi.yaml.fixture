@@ -1,0 +1,32 @@
+name: states-broken-preview
+runtime: yaml
+description: >-
+  Broken on purpose. It needs a config value that its stack file does not
+  set, so every preview fails. It keeps a preview failure on the dashboard.
+config:
+  # Required, and Pulumi.prod.yaml does not set it on purpose. Every preview
+  # stops here with "Stack 'prod' is missing configuration value 'region'".
+  region:
+    type: string
+  token:
+    type: string
+    secret: true
+resources:
+  name:
+    type: random:RandomPet
+    properties:
+      length: 2
+      prefix: ${region}
+    options:
+      version: 4.21.2
+  hello:
+    type: command:local:Command
+    properties:
+      create: echo "hello from $NAME"
+      environment:
+        NAME: ${name.id}
+        # A fake value that must never show on the dashboard.
+        NOTE: CANARY-VALUE
+        TOKEN: ${token}
+    options:
+      version: 1.2.1
