@@ -16,6 +16,7 @@ Pulumi programs in TypeScript, in one repo, with a package that they share and o
   - a change in `apps/web/` previews `web:dev` and `web:prod`,
   - a change in `packages/naming/` previews all three stacks of the two apps and nothing else,
   - a change to the root `package.json`, `package-lock.json` or `.nvmrc` previews every stack in the repo, because no stack claims them. That is on purpose: every program runs on them. A new dependency of one app changes the root lockfile too, so it previews everything as well.
+- **`web:prod` depends on `api:prod`.** [`sluiceway.yaml`](../../sluiceway.yaml) says so with `dependsOn`, as for a web app that calls its API. The programs share no value, so the entry is there to show what the dashboard does with it: a tick on `web:prod` starts nothing while `api:prod` has a change that nobody ticked, and a tick on `web:prod` while `api:prod` deploys is queued behind it and deploys in a later run.
 - **Project names are unique in the repo**, `monorepo-web` and `monorepo-api`, because the file backend here keeps stacks per project name.
 
 Each stack has one secret config value, `token`, set to the fake string `CANARY-SECRET` and encrypted with the passphrase `sluiceway-examples`. The passphrase is public on purpose and protects nothing. Each program also sets one property to the fake string `CANARY-VALUE`. Neither string must ever show on the dashboard.

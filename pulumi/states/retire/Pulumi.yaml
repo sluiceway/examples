@@ -1,0 +1,28 @@
+name: states-retire
+runtime: yaml
+description: >-
+  A worker that is being retired. Deployed once, then changed so that its
+  next deploy deletes one resource and replaces another.
+config:
+  token:
+    type: string
+    secret: true
+resources:
+  name:
+    type: random:RandomPet
+    properties:
+      length: 2
+      prefix: retire
+    options:
+      version: 4.21.2
+  worker:
+    type: command:local:Command
+    properties:
+      create: echo "worker $NAME started"
+      environment:
+        NAME: ${name.id}
+        # A fake value that must never show on the dashboard.
+        NOTE: CANARY-VALUE
+        TOKEN: ${token}
+    options:
+      version: 1.2.1

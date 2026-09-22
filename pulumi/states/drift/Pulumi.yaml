@@ -1,0 +1,31 @@
+name: states-drift
+runtime: yaml
+description: >-
+  Writes a file on the runner. The runner is gone after the job, so a drift
+  check finds the file gone. It keeps a drifted row on the dashboard.
+config:
+  token:
+    type: string
+    secret: true
+resources:
+  # The deploy writes this file. The next job runs on a fresh runner without
+  # it, and `pulumi refresh --preview-only` reports it deleted: drift. A tick
+  # writes it again, and the next drift check finds it gone again. Git
+  # ignores the directory.
+  marker:
+    type: local:File
+    properties:
+      filename: ${pulumi.cwd}/out/deployed.txt
+      content: Deployed from the dashboard.
+    options:
+      version: 0.1.6
+  hello:
+    type: command:local:Command
+    properties:
+      create: echo "wrote the marker"
+      environment:
+        # A fake value that must never show on the dashboard.
+        NOTE: CANARY-VALUE
+        TOKEN: ${token}
+    options:
+      version: 1.2.1
