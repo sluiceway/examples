@@ -8,11 +8,11 @@ Stacks that are here only to put one state on the [dashboard](https://github.com
 | `broken-deploy/` | `pulumi/states/broken-deploy:prod` | A pending row with the line `last deploy failed: ...`. **Broken on purpose.** | A preview never runs the command, so it shows a create. A deploy runs it, and the command exits 1. |
 | `every-run/` | `pulumi/states/every-run:prod` | A pending row with the line `pending again right after a deploy of this same change ...`. | The program reads the clock on every run and puts the time in a property, so after every deploy the next preview has a change again. |
 | `drift/` | `pulumi/states/drift:prod` | A row under "Drifted", with `1 gone outside the code`. | The deploy writes a file on the runner. The next job runs on a fresh runner without it, and the drift check of the daily scan finds the file gone. A tick writes it again, until the next check. |
-| `retire/` | `pulumi/states/retire:prod` | A pending row that deletes one resource and replaces another. | Deployed once, then changed by a pull request. |
+| `retire/` | `pulumi/states/retire:prod` | A pending row that deletes one resource and replaces another, and a comment on the dashboard for a refused tick. | Deployed once, then changed by a pull request: the worker is gone and the name gets longer, which forces a replace. Its `tickers` in [`sluiceway.yaml`](../../sluiceway.yaml) names one login, `example-release-manager`, which is not the owner of this repo, so the owner's tick is refused. |
 
 Please do not tick `broken-deploy` or `retire`: the first fails on purpose, and the second is kept pending to show a delete and a replace.
 
-Like every stack in this repo, each one has one secret config value, `token`, set to the fake string `CANARY-SECRET` and encrypted with the public passphrase `sluiceway-examples`, and each program sets `NOTE` to the fake string `CANARY-VALUE`. Neither must ever show on the dashboard.
+Like every stack in this repo, each one has one secret config value, `token`, set to the fake string `CANARY-SECRET` and encrypted with the public passphrase `sluiceway-examples`, and each program sets `NOTE` to the fake string `CANARY-VALUE`, except `retire`, whose one resource with it is the one its next deploy deletes. Neither must ever show on the dashboard.
 
 ## Try it on your machine
 

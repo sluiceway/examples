@@ -1,8 +1,8 @@
 name: states-retire
 runtime: yaml
 description: >-
-  A worker that is being retired. Deployed once, then changed so that its
-  next deploy deletes one resource and replaces another.
+  A worker that is being retired. Its next deploy deletes the worker and
+  replaces the name, which a longer name forces. It stays pending.
 config:
   token:
     type: string
@@ -11,18 +11,9 @@ resources:
   name:
     type: random:RandomPet
     properties:
-      length: 2
+      # Was 2. A new length makes a new name, so the deploy replaces it.
+      length: 3
       prefix: retire
     options:
       version: 4.21.2
-  worker:
-    type: command:local:Command
-    properties:
-      create: echo "worker $NAME started"
-      environment:
-        NAME: ${name.id}
-        # A fake value that must never show on the dashboard.
-        NOTE: CANARY-VALUE
-        TOKEN: ${token}
-    options:
-      version: 1.2.1
+  # The worker is gone from the program, so the next deploy deletes it.
