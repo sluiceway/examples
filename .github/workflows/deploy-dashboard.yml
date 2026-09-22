@@ -2,8 +2,10 @@
 # hosted runners. Everything the tool needs is set up in the steps before the
 # Sluiceway step. The steps marked "Pulumi" are Pulumi's. The steps marked
 # "Monorepo" install the npm workspaces at the repo root, for the TypeScript
-# programs in pulumi/monorepo. Steps for OpenTofu and Terraform will sit next
-# to them once the action supports those tools.
+# programs in pulumi/monorepo. The steps "Load the environment" load an env
+# file of secret references, for pulumi/secret-manager, from a stand-in for a
+# secret manager with fake values. Steps for OpenTofu and Terraform will sit
+# next to them once the action supports those tools.
 #
 # Nothing here is a secret. The only token is the workflow's own GITHUB_TOKEN.
 name: deploy-dashboard
@@ -80,6 +82,23 @@ jobs:
       # every stack, so a normal install has no such step.
       - name: Create the missing stacks (stand-in)
         run: .github/scripts/create-missing-stacks.sh
+
+      # Secret manager: the step of the action's secret-manager.yml. It runs
+      # last before Sluiceway, so no earlier step sees what it loads. A real
+      # repo installs the manager's CLI first, for example:
+      #   - uses: 1password/install-cli-action@v4
+      # and runs `op run` in place of the stand-in. This job loads the preview
+      # file. In a real repo its references point into a vault that only the
+      # scan's service account can read, with credentials that can only read.
+      - name: Load the environment
+        # Stand-in: fake-secret-run.sh resolves the fake:// references from a
+        # committed file of fake values, and no token is needed. A real repo
+        # sets the token of the scan's service account here, on this step only:
+        #   OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets.OP_PREVIEW_TOKEN }}
+        # and leaves SECRET_REFERENCE at the script's default, op://.
+        env:
+          SECRET_REFERENCE: fake://
+        run: .github/scripts/fake-secret-run.sh --env-file=ci/secret-manager/preview.env -- bash .github/scripts/export-env.sh ci/secret-manager/preview.env
 
       - uses: sluiceway/sluiceway@v0
         with:
@@ -158,6 +177,18 @@ jobs:
           restore-keys: pulumi-state-
       - name: Create the missing stacks (stand-in)
         run: .github/scripts/create-missing-stacks.sh
+
+      # Secret manager: as in the scan job, with the deploy file. In a real
+      # repo its references point into a vault that only the deploy's service
+      # account can read, and that account's token is a secret of the
+      # environment above, so only this job can use it. Install the CLI here:
+      #   - uses: 1password/install-cli-action@v4
+      - name: Load the environment
+        # Stand-in, as in the scan job. A real repo sets here:
+        #   OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets.OP_DEPLOY_TOKEN }}
+        env:
+          SECRET_REFERENCE: fake://
+        run: .github/scripts/fake-secret-run.sh --env-file=ci/secret-manager/deploy.env -- bash .github/scripts/export-env.sh ci/secret-manager/deploy.env
 
       - uses: sluiceway/sluiceway@v0
         with:

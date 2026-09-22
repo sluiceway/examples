@@ -58,3 +58,16 @@ stacks:
   - path: pulumi/monorepo/apps/api
     inputs:
       - pulumi/monorepo/packages/naming/**
+  # The program of pulumi/secret-manager reads what the job loads from the env
+  # files in ci/secret-manager, so a change to one of them changes what the
+  # program sees. Here only this stack reads them, so it claims them, and a
+  # push that changes only an env file previews this stack and nothing else.
+  # In a real repo where every stack runs on one env file, leave it unclaimed:
+  # a change to it then previews every stack, which is the safe side.
+  # The stand-in scripts and the file of fake values in .github/scripts stay
+  # under scan.unrelated: in a real repo the values live in the secret
+  # manager, and a push never changes them. A new value there reaches the
+  # next scan, like any change made outside the repo.
+  - path: pulumi/secret-manager/webhook
+    inputs:
+      - ci/secret-manager/**

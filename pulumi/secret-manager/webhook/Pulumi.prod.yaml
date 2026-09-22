@@ -1,0 +1,4 @@
+encryptionsalt: v1:5CfHvkUeTE8=:v1:slg6LbCwHAsQpyDO:pSh5MNpWJR6WaPrSOpCItk9wgyb4bg==
+config:
+  secret-manager-webhook:token:
+    secure: v1:C2VUyNMFwR9F0X8V:EoR1eivD4T0qEUbU+A6JW9POdZFU89oNR6eZb6k=

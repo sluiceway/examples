@@ -1,0 +1,62 @@
+name: secret-manager-webhook
+runtime: yaml
+description: >-
+  Registers a webhook with an API, with a key and an endpoint that the job
+  loads from an env file of secret references. One stack, prod.
+config:
+  token:
+    type: string
+    secret: true
+variables:
+  # FAKE_ENDPOINT is a plain value of the env file. The program reads it from
+  # its environment at every preview and deploy, and fails when it is missing.
+  endpoint:
+    fn::invoke:
+      function: command:local:run
+      arguments:
+        command: printenv FAKE_ENDPOINT
+      options:
+        version: 1.2.1
+      return: stdout
+  # FAKE_API_KEY is a secret of the env file. This stands for signing in to
+  # the API: it fails without a key and returns the account the key belongs
+  # to. It prints the key on purpose, as a chatty tool or an error message
+  # could, so that the job log shows the runner's mask at work (***). The key
+  # never reaches a resource, so it is not in the state, and the scan and a
+  # deploy can use different keys without a diff.
+  account:
+    fn::invoke:
+      function: command:local:run
+      arguments:
+        command: |
+          test -n "$FAKE_API_KEY"
+          echo "Signing in to $FAKE_ENDPOINT with the key $FAKE_API_KEY" >&2
+          echo sluiceway-examples
+      options:
+        version: 1.2.1
+      return: stdout
+resources:
+  # A random name for the webhook, made once and kept.
+  name:
+    type: random:RandomPet
+    properties:
+      length: 2
+      prefix: hook
+    options:
+      version: 4.21.2
+  # Runs `echo` on the runner at deploy time. No API is called.
+  hook:
+    type: command:local:Command
+    properties:
+      create: echo "Registering $NAME at $ENDPOINT for $ACCOUNT"
+      environment:
+        ENDPOINT: ${endpoint}
+        ACCOUNT: ${account}
+        NAME: ${name.id}
+        # A fake value that must never show on the dashboard.
+        NOTE: CANARY-VALUE
+        TOKEN: ${token}
+    options:
+      version: 1.2.1
+outputs:
+  name: ${name.id}
