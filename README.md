@@ -57,3 +57,5 @@ In a real repo, read the action's [configuration](https://github.com/sluiceway/s
 - **No secrets in the repo settings.** The workflows use the workflow's own `GITHUB_TOKEN` and nothing else.
 
 [`docs/findings.md`](docs/findings.md) lists the rough edges of the action met while building this repo.
+
+[`docs/release-verification.md`](docs/release-verification.md) is the design of the test that verifies every release of the action end to end, on a test bed repo of its own.
