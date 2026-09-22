@@ -15,6 +15,7 @@ Sluiceway runs one dashboard per repo, with its settings at the repo root. So ev
 | [`pulumi/plain/`](pulumi/plain/) | The simplest install: two Pulumi YAML projects, three stacks, nothing to install. | Here |
 | [`pulumi/monorepo/`](pulumi/monorepo/) | TypeScript programs with a shared package, and one `npm ci` at the root for all of them. | Here |
 | [`pulumi/secret-manager/`](pulumi/secret-manager/) | An env file of secret references, loaded and masked with the action's `export-env.sh`. Here with fake references and fake values only. | Here |
+| [`pulumi/states/`](pulumi/states/) | Stacks that are here only to put one state on the dashboard: a preview that fails and a deploy that fails, both on purpose, a stack that is pending again after every deploy, drift, and a delete waiting for a tick. | Here |
 | [`pulumi/cloud-oidc/`](pulumi/cloud-oidc/) | A cloud account reached with OIDC, a role that reads for the scan and one that changes things for a deploy. | Later, waits for a sandbox cloud account |
 | [`opentofu/`](opentofu/) | OpenTofu stacks on the same dashboard as the Pulumi ones: one root module in two workspaces with a var file each, and one in the default workspace. Declared in `sluiceway.yaml`. | Here |
 | `terraform/` | The same with Terraform stacks. | Later, when the action supports it |

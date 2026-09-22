@@ -1,0 +1,5 @@
+encryptionsalt: v1:m74vwjdlngg=:v1:IE3E75KlVlf6Qk2Z:1tnc1+ho+oeLZ9B/lFS02iuevSXPVQ==
+config:
+  greeting:greeting: Hello from scratch
+  greeting:token:
+    secure: v1:bsbExL29PUe2r8TB:e8NJakAOSFjRQEFu4ktICdX/2+dMDNVQXN3752Y=

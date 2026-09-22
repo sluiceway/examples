@@ -1,0 +1,32 @@
+name: states-every-run
+runtime: yaml
+description: >-
+  Reads the clock on every run, so it is pending again after every deploy.
+  It keeps the pending-again line on the dashboard.
+config:
+  token:
+    type: string
+    secret: true
+variables:
+  # The time of this run. A preview, the fresh preview before a deploy and the
+  # deploy each read a new one, so the stack never reaches in sync.
+  now:
+    fn::invoke:
+      function: command:local:run
+      arguments:
+        command: date -u +%Y-%m-%dT%H:%M:%SZ
+      options:
+        version: 1.2.1
+      return: stdout
+resources:
+  stamp:
+    type: command:local:Command
+    properties:
+      create: echo "deployed at $STAMP"
+      environment:
+        STAMP: ${now}
+        # A fake value that must never show on the dashboard.
+        NOTE: CANARY-VALUE
+        TOKEN: ${token}
+    options:
+      version: 1.2.1

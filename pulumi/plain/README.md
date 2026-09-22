@@ -4,10 +4,12 @@ The simplest install: Pulumi YAML programs, so there is nothing to install befor
 
 | Directory | Stacks | Stack ids | What it does |
 |---|---|---|---|
-| `greeting/` | `dev`, `prod` | `pulumi/plain/greeting:dev`, `pulumi/plain/greeting:prod` | Makes a random name and runs `echo` with a greeting from the stack's config. Two stacks in one directory. |
+| `greeting/` | `dev`, `prod`, `scratch` | `pulumi/plain/greeting:dev`, `pulumi/plain/greeting:prod`, `pulumi/plain/greeting:scratch` | Makes a random name and runs `echo` with a greeting from the stack's config. Three stacks in one directory. |
 | `release/` | `prod` | `pulumi/plain/release:prod` | Makes a build id for the configured version and writes a release note to `out/release.txt` on the runner. |
 
 Sluiceway finds these stacks from the files alone: a directory with `Pulumi.yaml` is a project, and every `Pulumi.<name>.yaml` next to it is a stack.
+
+`greeting:scratch` is a scratch stack, for trying a change by hand. An `ignore` entry with a reason in [`sluiceway.yaml`](../../sluiceway.yaml) leaves it out, so it has no row and is never previewed. The dashboard lists it with the reason in a fold under In sync.
 
 Each stack has one secret config value, `token`, set to the fake string `CANARY-SECRET` and encrypted with the passphrase `sluiceway-examples`. The passphrase is public on purpose and protects nothing. Each program also sets one property to the fake string `CANARY-VALUE`. Neither string must ever show on the dashboard.
 

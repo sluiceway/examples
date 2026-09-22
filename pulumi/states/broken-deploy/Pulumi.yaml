@@ -1,0 +1,30 @@
+name: states-broken-deploy
+runtime: yaml
+description: >-
+  Broken on purpose. Its preview works and its deploy fails, so the dashboard
+  keeps a failed deploy with its failure line.
+config:
+  token:
+    type: string
+    secret: true
+resources:
+  name:
+    type: random:RandomPet
+    properties:
+      length: 2
+      prefix: broken
+    options:
+      version: 4.21.2
+  # A preview does not run the command, so it shows a create. The deploy runs
+  # it, and it exits 1 on purpose.
+  release:
+    type: command:local:Command
+    properties:
+      create: echo "releasing $NAME" && echo "This deploy fails on purpose." >&2 && exit 1
+      environment:
+        NAME: ${name.id}
+        # A fake value that must never show on the dashboard.
+        NOTE: CANARY-VALUE
+        TOKEN: ${token}
+    options:
+      version: 1.2.1

@@ -24,6 +24,12 @@ dashboard:
     - environment.GREETING # the greeting of pulumi/plain/greeting
     - environment.VERSION  # the version of pulumi/plain/release
 
+# Stacks that get no row. An entry with a reason lists the stack with it in a
+# fold under In sync, so the exclusion stays in sight.
+ignore:
+  - glob: "**/*:scratch"
+    reason: A scratch stack for trying a change by hand. It is never deployed from here.
+
 scan:
   # Files that no program reads. A push that changes only these previews no
   # stack. A changed file that no stack claims makes a full scan instead,
@@ -44,6 +50,16 @@ scan:
   # job log, and only values the tool marks secret are masked there. Read
   # https://github.com/sluiceway/sluiceway/blob/main/docs/security.md#the-tools-own-diff-in-the-job-log
   logDiff: true
+
+# Off by default. On here so that the dashboard can show drift: every scan
+# that the daily schedule or "Run workflow" starts also checks each Pulumi
+# stack against what is real, with `pulumi refresh --preview-only`, which
+# changes nothing. pulumi/states/drift writes a file on the runner, and the
+# next runner does not have it, so the check always finds it gone. OpenTofu
+# stacks are not checked yet. Read
+# https://github.com/sluiceway/sluiceway/blob/main/docs/configuration.md#driftenabled
+drift:
+  enabled: true
 
 # Settings per stack. An entry without tool adds to a stack that discovery
 # found. An entry with tool: opentofu declares a stack, because files alone
@@ -85,6 +101,15 @@ stacks:
   - path: pulumi/monorepo/apps/api
     inputs:
       - pulumi/monorepo/packages/naming/**
+  # web:prod depends on api:prod, as a web app that calls its API would. Here
+  # the two programs share no value: the entry is there to show the order. A
+  # tick on web:prod starts nothing while api:prod has a change that nobody
+  # ticked, and a tick on web:prod while api:prod deploys waits until it went
+  # out, then deploys in a later run.
+  - path: pulumi/monorepo/apps/web
+    name: prod
+    dependsOn:
+      - pulumi/monorepo/apps/api:prod
   # The program of pulumi/secret-manager reads what the job loads from the env
   # files in ci/secret-manager, so a change to one of them changes what the
   # program sees. Here only this stack reads them, so it claims them, and a
