@@ -22,13 +22,13 @@ The showcase dashboard of this repo, [issue #4](https://github.com/sluiceway/exa
 
 1. **Pick the version.** From the trigger (below). The driver resolves the tag `vX.Y.Z` on `sluiceway/sluiceway` to its commit and stops when the tag does not exist.
 2. **Reset the test bed** (next section).
-3. **Build the fixture commit.** The driver copies `release-verify/fixtures/base/` into an empty tree, drops the `.fixture` suffixes, writes the workflow with `uses: sluiceway/sluiceway@vX.Y.Z` (the exact tag, never `@v0`), and makes one commit with no parent.
+3. **Build the fixture commit.** The driver copies `release-verify/fixtures/base/` into an empty tree, drops the `.fixture` suffixes, writes the workflow with `uses: sluiceway/sluiceway@vX.Y.Z` (the exact tag, never `@v0`), and makes one commit with no parent, through GitHub's Git Data API: the driver needs no clone and no git credentials.
 4. **Force-push it** to `main` of `sluiceway/release-verify`. That push starts the first scan.
 5. **Run the scenarios in order.** Each one is a push of an overlay from `release-verify/fixtures/<scenario>/`, an edit of the dashboard body, a pull request, or a dispatch of a helper workflow of the test bed, followed by a wait until the test bed is quiet: every run that the step started, and every run those started (settle's dispatch, resolve's dispatch), has ended.
 6. **Assert** on what GitHub holds, after each step and once more at the end (the leak check reads everything).
 7. **Clean up** (below), write the job summary, update the summary issue, and, when the switch is on, open or update bug issues.
 
-The test bed's workflow is this repo's [`deploy-dashboard.yml`](../.github/workflows/deploy-dashboard.yml) with the tool steps of every adapter, plus three steps per Sluiceway step that only the test needs: one writes the step's outputs to a JSON file, and two upload that file and the result file as an artifact named `release-verify-<run id>-<job>-<index>`. Apart from the pinned tag and those steps it is a normal install.
+The test bed's workflow is this repo's [`deploy-dashboard.yml`](../.github/workflows/deploy-dashboard.yml) with the tool steps of every adapter, plus three steps per Sluiceway step that only the test needs: one writes the step's outputs to a JSON file, and two upload that file and the result file as an artifact named `release-verify-<run id>-<attempt>-<job>`, with the matrix index after `apply`. Apart from the pinned tag and those steps it is a normal install.
 
 Runs of different versions never overlap on the test bed: `release-verify.yml` has one concurrency group, `release-verify`, with `queue: max`, so a second version waits for the first instead of replacing it.
 
@@ -254,5 +254,6 @@ The test bed's token calls stay far below GitHub's limits: the driver polls runs
 
 1. This page, and the bot in [`findings.md`](findings.md).
 2. The driver, the reset and the cleanup, with scenarios 1 to 5 for Pulumi and OpenTofu, green against v0.22.0 on a local run.
+   Run it on a laptop as [`release-verify/README.md`](../release-verify/README.md) says.
 3. Then the rest, a few scenarios per pull request, the adapters added as they go: Terraform, Terragrunt and CDK for Terraform, then kind with Helm and kubectl, which first proves the cluster stand-in.
 4. `release-verify.yml` with its triggers, once the bot's token exists. The bug issues stay behind their switch.

@@ -1,0 +1,41 @@
+name: release
+runtime: yaml
+description: Writes a release note to a file. One stack, prod.
+config:
+  version:
+    type: string
+  token:
+    type: string
+    secret: true
+resources:
+  # A new id every time the version changes.
+  build:
+    type: random:RandomId
+    properties:
+      byteLength: 4
+      keepers:
+        version: ${version}
+    options:
+      version: 4.21.2
+  # A file on the runner. It is gone when the job ends, and git ignores it.
+  note:
+    type: local:File
+    properties:
+      filename: ${pulumi.cwd}/out/release.txt
+      content: Release ${version}, build ${build.hex}.
+    options:
+      version: 0.1.6
+  # Runs `echo` on the runner at deploy time. NOTE is a fake value that must
+  # never show on the dashboard.
+  announce:
+    type: command:local:Command
+    properties:
+      create: echo "release $VERSION ready"
+      environment:
+        VERSION: ${version}
+        NOTE: CANARY-VALUE
+        TOKEN: ${token}
+    options:
+      version: 1.2.1
+outputs:
+  build: ${build.hex}

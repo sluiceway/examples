@@ -1,0 +1,6 @@
+{
+  "name": "sluiceway-release-verify",
+  "private": true,
+  "description": "The driver of the release verification. It runs on Node 24 as it is, with no install: see docs/release-verification.md.",
+  "type": "module"
+}
