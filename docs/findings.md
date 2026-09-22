@@ -132,3 +132,11 @@ At `5f2fc11` (0.18.0), `src/core/attribution.ts:229-238` builds the line under a
 - **Nothing landed at all.** The line reads `nothing this stack claims has changed since its last deploy · compare`, with a compare link from `f9570cc055ce` to `f9570cc055ce` ([run 35741257396](https://github.com/sluiceway/examples/actions/runs/35741257396)). GitHub's page for it says there is nothing to compare. The line is right. The link has nothing to show.
 
 With `from` alone, the line could say "no change this stack claims, 1 change outside it" and drop the compare link when both ends are the same commit.
+
+## 2026-09-22: a test of every release needs a person's account to tick
+
+Not a bug. The release verification of [`release-verification.md`](release-verification.md) ticks the dashboard of a test bed, and at `f99a0f7` (0.22.0) only a person can tick: `src/core/tick-rule.ts:45-47` (`isPerson`) takes an editor of type `User` only, `src/github/ticks.ts:70` drops every other tick with no lookup and no comment, and `docs/security.md:31` says so. The edit history names the editor (record 0025), so no event payload can stand in for one. The workflow's own token cannot tick either: its edits start no run (record 0017) and its editor is a bot. A GitHub App's editor is a bot too.
+
+So the verification ticks with a dedicated user account, the test bot, with a fine-grained token that reaches `sluiceway/release-verify` and, for bug issues, `sluiceway/sluiceway`, where the account can only read and open issues. [The test bot](release-verification.md#the-test-bot) lists its permissions, its limits and what a leak of its token allows. The owner's own token was rejected: it would carry everything the owner can do on every repo the owner can reach.
+
+For the action this means that a repo which wants to test its own dashboard end to end in CI has to keep a person's token as a secret. `docs/later.md:58` already names the way out if it ever comes, an entry point such as `workflow_dispatch` with a stack input, where GitHub records who started it. Until then the verification counts on the test bot, and a tick by `github-actions[bot]` is one of its scenarios: it must deploy nothing.
