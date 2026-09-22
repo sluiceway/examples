@@ -1,11 +1,11 @@
 # The whole Sluiceway workflow of the action's README, with its four jobs, on
-# hosted runners. Everything the tool needs is set up in the steps before the
-# Sluiceway step. The steps marked "Pulumi" are Pulumi's. The steps marked
+# hosted runners. Everything the tools need is set up in the steps before the
+# Sluiceway step. The steps marked "Pulumi" are Pulumi's, the steps marked
+# "OpenTofu" are OpenTofu's, for the stacks in opentofu/. The steps marked
 # "Monorepo" install the npm workspaces at the repo root, for the TypeScript
 # programs in pulumi/monorepo. The steps "Load the environment" load an env
 # file of secret references, for pulumi/secret-manager, from a stand-in for a
-# secret manager with fake values. Steps for OpenTofu and Terraform will sit
-# next to them once the action supports those tools.
+# secret manager with fake values.
 #
 # Nothing here is a secret. The only token is the workflow's own GITHUB_TOKEN.
 name: deploy-dashboard
@@ -63,10 +63,30 @@ jobs:
           path: ~/.pulumi/plugins
           key: pulumi-plugins-${{ runner.os }}-${{ hashFiles('pulumi/**/Pulumi.yaml', 'package-lock.json') }}
 
+      # OpenTofu: the CLI, as the action's credentials page shows it. No
+      # wrapper: Sluiceway reads what tofu itself prints.
+      - uses: opentofu/setup-opentofu@v2
+        with:
+          tofu_version: 1.12.6
+          tofu_wrapper: false
+      # OpenTofu: the providers, downloaded once and shared by every init.
+      # The first run fills the cache. The lock files name every provider.
+      - name: Use a provider cache (OpenTofu)
+        run: |
+          mkdir -p "$RUNNER_TEMP/tofu-plugins"
+          echo "TF_PLUGIN_CACHE_DIR=$RUNNER_TEMP/tofu-plugins" >> "$GITHUB_ENV"
+      - uses: actions/cache@v6
+        with:
+          path: ${{ runner.temp }}/tofu-plugins
+          key: tofu-plugins-${{ runner.os }}-${{ hashFiles('opentofu/**/.terraform.lock.hcl') }}
+
       # Stand-in for a real state backend (a bucket, Pulumi Cloud), not part
-      # of a normal install. The state is a directory on the runner, kept
-      # between runs in the Actions cache. The scan takes the newest state
-      # that a deploy saved and never saves one itself.
+      # of a normal install. The state is kept between runs in the Actions
+      # cache, one cache for both tools: Pulumi's file backend is a directory
+      # on the runner, and OpenTofu's local backend writes terraform.tfstate
+      # (the default workspace) or terraform.tfstate.d/<workspace>/ next to
+      # each module in opentofu/. The scan takes the newest state that a
+      # deploy saved and never saves one itself.
       - name: Use the file backend (stand-in)
         # The directory has to exist: a fresh cache restores none.
         run: |
@@ -74,12 +94,19 @@ jobs:
           echo "PULUMI_BACKEND_URL=file://$RUNNER_TEMP/pulumi-state" >> "$GITHUB_ENV"
       - uses: actions/cache/restore@v6
         with:
-          path: ${{ runner.temp }}/pulumi-state
-          key: pulumi-state-${{ github.run_id }}
-          restore-keys: pulumi-state-
+          # The same paths in every step: the cache finds an entry only when
+          # the list is the same as when it was saved.
+          path: |
+            ${{ runner.temp }}/pulumi-state
+            opentofu/**/terraform.tfstate
+            opentofu/**/terraform.tfstate.d
+          key: state-${{ github.run_id }}
+          restore-keys: state-
       # Stand-in too: a fresh cache has no stacks, and a stack config file
       # with no stack in the backend is a red row. A real backend already has
-      # every stack, so a normal install has no such step.
+      # every stack, so a normal install has no such step. OpenTofu needs no
+      # such step: the local backend plans a workspace it does not hold as
+      # all creates, and the first deploy makes it.
       - name: Create the missing stacks (stand-in)
         run: .github/scripts/create-missing-stacks.sh
 
@@ -127,9 +154,9 @@ jobs:
     if: ${{ !cancelled() && needs.resolve.outputs.matrix != '' && needs.resolve.outputs.matrix != '[]' }}
     strategy:
       fail-fast: false
-      # Stand-in for a real backend: every stack shares the one state
-      # directory in the cache. Two deploys at once would restore the same
-      # state and the one that saves last would drop the other's deploy. So
+      # Stand-in for a real backend: every stack of both tools shares the one
+      # state cache. Two deploys at once would restore the same state and the
+      # one that saves last would drop the other's deploy. So
       # the deploys of one run go one at a time, and the concurrency group
       # below does the same across runs. A real backend locks each stack on
       # its own, and there the README's group per stack is the right one.
@@ -168,7 +195,22 @@ jobs:
           path: ~/.pulumi/plugins
           key: pulumi-plugins-${{ runner.os }}-${{ hashFiles('pulumi/**/Pulumi.yaml', 'package-lock.json') }}
 
-      # Stand-in for a real state backend, as in the scan job.
+      # OpenTofu: the CLI and the providers, as in the scan job.
+      - uses: opentofu/setup-opentofu@v2
+        with:
+          tofu_version: 1.12.6
+          tofu_wrapper: false
+      - name: Use a provider cache (OpenTofu)
+        run: |
+          mkdir -p "$RUNNER_TEMP/tofu-plugins"
+          echo "TF_PLUGIN_CACHE_DIR=$RUNNER_TEMP/tofu-plugins" >> "$GITHUB_ENV"
+      - uses: actions/cache/restore@v6
+        with:
+          path: ${{ runner.temp }}/tofu-plugins
+          key: tofu-plugins-${{ runner.os }}-${{ hashFiles('opentofu/**/.terraform.lock.hcl') }}
+
+      # Stand-in for a real state backend, as in the scan job, with the same
+      # paths for both tools.
       - name: Use the file backend (stand-in)
         # The directory has to exist: a fresh cache restores none.
         run: |
@@ -176,9 +218,12 @@ jobs:
           echo "PULUMI_BACKEND_URL=file://$RUNNER_TEMP/pulumi-state" >> "$GITHUB_ENV"
       - uses: actions/cache/restore@v6
         with:
-          path: ${{ runner.temp }}/pulumi-state
-          key: pulumi-state-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.stack }}
-          restore-keys: pulumi-state-
+          path: |
+            ${{ runner.temp }}/pulumi-state
+            opentofu/**/terraform.tfstate
+            opentofu/**/terraform.tfstate.d
+          key: state-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.stack }}
+          restore-keys: state-
       - name: Create the missing stacks (stand-in)
         run: .github/scripts/create-missing-stacks.sh
 
@@ -205,8 +250,11 @@ jobs:
       - uses: actions/cache/save@v6
         if: always()
         with:
-          path: ${{ runner.temp }}/pulumi-state
-          key: pulumi-state-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.stack }}
+          path: |
+            ${{ runner.temp }}/pulumi-state
+            opentofu/**/terraform.tfstate
+            opentofu/**/terraform.tfstate.d
+          key: state-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.stack }}
 
   settle:
     needs: [resolve, apply]
