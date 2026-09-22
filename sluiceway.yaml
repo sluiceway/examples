@@ -4,9 +4,10 @@
 # Sluiceway still finds every stack and gives each one a row. The whole list
 # of keys is in https://github.com/sluiceway/sluiceway/blob/main/docs/configuration.md
 #
-# Nothing here is about one tool. Only Pulumi is supported today. OpenTofu and
-# Terraform stacks will show on the same dashboard once the action supports
-# them, with ids that come from their directories.
+# One dashboard for the stacks of both tools in this repo, Pulumi and
+# OpenTofu. Sluiceway finds the Pulumi stacks from their files. It finds no
+# OpenTofu stack on its own: each one is declared under stacks below, with
+# tool: opentofu. Terraform is not supported by the action yet.
 
 dashboard:
   # The title the dashboard issue gets when Sluiceway first creates it.
@@ -44,9 +45,35 @@ scan:
   # https://github.com/sluiceway/sluiceway/blob/main/docs/security.md#the-tools-own-diff-in-the-job-log
   logDiff: true
 
-# Settings per stack. Discovery already finds every stack, so these entries
-# only add to stacks that exist.
+# Settings per stack. An entry without tool adds to a stack that discovery
+# found. An entry with tool: opentofu declares a stack, because files alone
+# cannot say which directory is a root module or which workspaces it has.
 stacks:
+  # opentofu/site: one root module in two workspaces, so two stacks, with the
+  # ids opentofu/site:dev and opentofu/site:prod. The name is only the part of
+  # the id after the colon and selects nothing: the workspace does, and
+  # Sluiceway sets TF_WORKSPACE to it for every command of the stack. Each
+  # workspace has its own var file, passed with -var-file. A var file inside
+  # the stack's directory is claimed by the stack, so a change to dev.tfvars
+  # previews both stacks of the directory and nothing else.
+  - path: opentofu/site
+    name: dev
+    tool: opentofu
+    options:
+      workspace: dev
+      varFiles: [dev.tfvars]
+  - path: opentofu/site
+    name: prod
+    tool: opentofu
+    options:
+      workspace: prod
+      varFiles: [prod.tfvars]
+  # opentofu/notes: a root module in .tofu files, in the default workspace,
+  # with no var file. Without a name, its id is the path alone,
+  # opentofu/notes.
+  - path: opentofu/notes
+    tool: opentofu
+
   # The two TypeScript apps of pulumi/monorepo import the shared package
   # packages/naming, which lies outside their directories. A stack claims the
   # files in its own directory and the ones its inputs name, so each app names
