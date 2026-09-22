@@ -40,7 +40,7 @@ At `c87ff19` (0.4.0), the first scan that Sluiceway ran here ([run 35705995919](
 
 ## 2026-09-22: the monorepo docs say nothing about `stacks[].inputs` or the root lockfile
 
-At `c8563dc`, "The monorepo" in `docs/example-workflows.md:22-26` and the example `examples/workflows/node-monorepo.yml` cover the install and the credentials, and stop there. A monorepo with a shared package needs two more facts to get the scan it expects, and both are only in `docs/configuration.md`:
+At `69dae83` (0.5.0, what `@v0` runs now), "The monorepo" in `docs/example-workflows.md:22-26` and the example `examples/workflows/node-monorepo.yml` cover the install and the credentials, and stop there. A monorepo with a shared package needs two more facts to get the scan it expects, and both are only in `docs/configuration.md`:
 
 - **A shared package outside the apps' directories needs `stacks[].inputs`.** Without it, a push that changes only the package claims nothing, so it gives a full scan instead of previewing the apps that import it (`docs/configuration.md`, "`stacks[].inputs`"). The example repo in that same file (`apps/web` with `packages/ui/**`) is exactly this case, but the monorepo page does not point at it.
 - **The root lockfile makes every dependency change a full scan.** `docs/configuration.md`, "`scan.unrelated`", says to keep lockfiles and package manifests off the list so that a change to one previews every stack. In a monorepo that means a new dependency of one app previews every stack in the repo, because the app's `package.json` change comes with a change to the root `package-lock.json`. That is the safe side and this repo keeps it, but a reader of the monorepo page does not learn it there.
@@ -49,7 +49,7 @@ This repo's [`sluiceway.yaml`](../sluiceway.yaml) gives both apps of `pulumi/mon
 
 ## 2026-09-22: the TypeScript example does not run with TypeScript 6 or 7
 
-At `c8563dc`, `examples/pulumi-basic/site/package.json:12` pins `typescript` 5.9.3 and `examples/pulumi-basic/site/tsconfig.json:7` sets `"moduleResolution": "node"`. This repo copied that `tsconfig.json` for `pulumi/monorepo`. Tried locally with Pulumi 3.198 and `@pulumi/pulumi` 3.263.0, a preview of `pulumi/monorepo/apps/web:dev`:
+At `69dae83` (0.5.0, what `@v0` runs now), `examples/pulumi-basic/site/package.json:12` pins `typescript` 5.9.3 and `examples/pulumi-basic/site/tsconfig.json:7` sets `"moduleResolution": "node"`. This repo copied that `tsconfig.json` for `pulumi/monorepo`. Tried locally with Pulumi 3.198 and `@pulumi/pulumi` 3.263.0, a preview of `pulumi/monorepo/apps/web:dev`:
 
 - with TypeScript 6.0.3 it fails with `error TS5107: Option 'moduleResolution=node10' is deprecated and will stop functioning in TypeScript 7.0`,
 - with TypeScript 7.0.2 it fails with `TypeError: Cannot read properties of undefined (reading 'readFile')`, because Pulumi's ts-node cannot load it.
@@ -58,4 +58,4 @@ Both are Pulumi's and TypeScript's, not Sluiceway's. But a user who copies the e
 
 ## 2026-09-22: two rows numbered 21 in the onboarding log
 
-At `c8563dc`, `docs/onboarding-log.md:50` and `docs/onboarding-log.md:53` are both hurdle 21 (a stack pending again after a deploy, and the `actions/cache@v4` warning), and the second one comes after 22 and 23. A link or a mention of "hurdle 21" is ambiguous.
+At `69dae83` (0.5.0, what `@v0` runs now), `docs/onboarding-log.md:50` and `docs/onboarding-log.md:53` are both hurdle 21 (a stack pending again after a deploy, and the `actions/cache@v4` warning), and the second one comes after 22 and 23. A link or a mention of "hurdle 21" is ambiguous.

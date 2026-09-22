@@ -32,6 +32,7 @@ scan:
     - "docs/**"
     - ".github/**"
     - "LICENSE*"
+    - "**/.gitignore"
   # Kept off this list on purpose: package.json, package-lock.json and .nvmrc
   # at the root. Every TypeScript program in pulumi/monorepo runs on them, and
   # no stack claims them, so a change to one of them previews every stack.
