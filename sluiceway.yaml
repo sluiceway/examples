@@ -120,6 +120,14 @@ stacks:
   # under scan.unrelated: in a real repo the values live in the secret
   # manager, and a push never changes them. A new value there reaches the
   # next scan, like any change made outside the repo.
+  # pulumi/states/retire:prod deletes a resource, so only a named person may
+  # tick it. The name is a placeholder that is not the owner of this repo, so
+  # a tick by the owner is refused and gets a comment on the dashboard. A
+  # list narrows: a person on it still needs write access.
+  - path: pulumi/states/retire
+    name: prod
+    tickers:
+      - example-release-manager
   - path: pulumi/secret-manager/webhook
     inputs:
       - ci/secret-manager/**
