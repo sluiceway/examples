@@ -52,7 +52,10 @@ jobs:
       # between runs in the Actions cache. The scan takes the newest state
       # that a deploy saved and never saves one itself.
       - name: Use the file backend (stand-in)
-        run: echo "PULUMI_BACKEND_URL=file://$RUNNER_TEMP/pulumi-state" >> "$GITHUB_ENV"
+        # The directory has to exist: a fresh cache restores none.
+        run: |
+          mkdir -p "$RUNNER_TEMP/pulumi-state"
+          echo "PULUMI_BACKEND_URL=file://$RUNNER_TEMP/pulumi-state" >> "$GITHUB_ENV"
       - uses: actions/cache/restore@v6
         with:
           path: ${{ runner.temp }}/pulumi-state
@@ -123,7 +126,10 @@ jobs:
 
       # Stand-in for a real state backend, as in the scan job.
       - name: Use the file backend (stand-in)
-        run: echo "PULUMI_BACKEND_URL=file://$RUNNER_TEMP/pulumi-state" >> "$GITHUB_ENV"
+        # The directory has to exist: a fresh cache restores none.
+        run: |
+          mkdir -p "$RUNNER_TEMP/pulumi-state"
+          echo "PULUMI_BACKEND_URL=file://$RUNNER_TEMP/pulumi-state" >> "$GITHUB_ENV"
       - uses: actions/cache/restore@v6
         with:
           path: ${{ runner.temp }}/pulumi-state
