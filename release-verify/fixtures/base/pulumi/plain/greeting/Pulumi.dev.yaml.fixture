@@ -1,0 +1,5 @@
+encryptionsalt: v1:0QLXGOT4QwI=:v1:gLb6GJPN9U05DBkI:+E0iZc3kuHKvV1gT4hZDvENkccp5Xw==
+config:
+  greeting:greeting: Hello
+  greeting:token:
+    secure: v1:IEmmPqUTS7XYDCzk:PUeIgPbulElPCW94NjREIoRGx8nj75C1PDaBI7I=

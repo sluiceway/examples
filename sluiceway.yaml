@@ -40,6 +40,9 @@ scan:
     - ".github/**"
     - "LICENSE*"
     - "**/.gitignore"
+    # The release verification: its driver and the fixtures it pushes to
+    # sluiceway/release-verify. No stack here reads them.
+    - "release-verify/**"
   # Kept off this list on purpose: package.json, package-lock.json and .nvmrc
   # at the root. Every TypeScript program in pulumi/monorepo runs on them, and
   # no stack claims them, so a change to one of them previews every stack.

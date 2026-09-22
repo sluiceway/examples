@@ -1,0 +1,28 @@
+# Sluiceway's settings for the test bed of the release verification. The
+# driver in sluiceway/examples (release-verify/) writes this repo on every
+# run. Every value here is fake.
+
+dashboard:
+  title: Sluiceway release verification
+  showValues:
+    - environment.GREETING
+
+ignore:
+  - glob: "**/*:scratch"
+    reason: A scratch stack. It is never deployed from here.
+
+stacks:
+  - path: opentofu/site
+    name: dev
+    tool: opentofu
+    options:
+      workspace: dev
+      varFiles: [dev.tfvars]
+  - path: opentofu/site
+    name: prod
+    tool: opentofu
+    options:
+      workspace: prod
+      varFiles: [prod.tfvars]
+  - path: opentofu/notes
+    tool: opentofu

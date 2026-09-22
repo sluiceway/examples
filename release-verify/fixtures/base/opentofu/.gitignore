@@ -1,0 +1,6 @@
+# What tofu writes next to a module. The state files stay out of git: the
+# workflow keeps them in a workflow artifact, as a stand-in for a real backend.
+.terraform/
+*.tfstate
+*.tfstate.*
+terraform.tfstate.d/

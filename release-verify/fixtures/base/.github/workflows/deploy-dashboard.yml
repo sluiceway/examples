@@ -1,0 +1,197 @@
+# The workflow of the test bed: sluiceway/examples' deploy-dashboard.yml, with
+# the tools of the adapters under test, Sluiceway pinned to the exact release
+# under test, and the steps marked "verification" after each Sluiceway step.
+# Those keep the step's outcome, its outputs and its result file as an
+# artifact, so the driver can read them. They are not part of a normal
+# install. The steps marked "stand-in" keep the state in a workflow artifact,
+# as sluiceway/examples does.
+#
+# Nothing here is a secret. The only token is the workflow's own GITHUB_TOKEN.
+name: deploy-dashboard
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "0 6 * * *"
+  workflow_dispatch:
+  issues:
+    types: [edited]
+
+permissions:
+  contents: read
+  issues: write
+  deployments: write
+  actions: write
+  pull-requests: read
+  checks: write
+
+jobs:
+  scan:
+    if: github.event_name != 'issues'
+    runs-on: ubuntu-latest
+    concurrency: sluiceway-scan
+    env:
+      # Public on purpose: every secret in this repo is fake.
+      PULUMI_CONFIG_PASSPHRASE: sluiceway-examples
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: pulumi/actions@v7
+        with:
+          pulumi-version: "{{PULUMI_VERSION}}"
+      - uses: opentofu/setup-opentofu@v2
+        with:
+          tofu_version: "{{TOFU_VERSION}}"
+          tofu_wrapper: false
+
+      - name: Restore the state (stand-in)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          echo "PULUMI_BACKEND_URL=file://$RUNNER_TEMP/pulumi-state" >> "$GITHUB_ENV"
+          .github/scripts/state.sh restore
+      - name: Create the missing stacks (stand-in)
+        run: .github/scripts/create-missing-stacks.sh
+
+      - id: sluiceway
+        uses: sluiceway/sluiceway@{{SLUICEWAY_REF}}
+        with:
+          mode: scan
+
+      - name: Keep the outputs (verification)
+        if: always()
+        env:
+          OUTCOME: ${{ steps.sluiceway.outcome }}
+          OUTPUTS: ${{ toJSON(steps.sluiceway.outputs) }}
+          RESULT_FILE: ${{ steps.sluiceway.outputs.result-file }}
+        run: .github/scripts/keep-outputs.sh
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: release-verify-${{ github.run_id }}-${{ github.run_attempt }}-scan
+          path: ${{ runner.temp }}/verification
+          include-hidden-files: true
+
+  resolve:
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'issues' && contains(github.event.issue.labels.*.name, 'sluiceway'))
+    runs-on: ubuntu-latest
+    concurrency: sluiceway-resolve
+    outputs:
+      matrix: ${{ steps.sluiceway.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v7
+      - id: sluiceway
+        uses: sluiceway/sluiceway@{{SLUICEWAY_REF}}
+        with:
+          mode: resolve
+
+      - name: Keep the outputs (verification)
+        if: always()
+        env:
+          OUTCOME: ${{ steps.sluiceway.outcome }}
+          OUTPUTS: ${{ toJSON(steps.sluiceway.outputs) }}
+          RESULT_FILE: ""
+        run: .github/scripts/keep-outputs.sh
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: release-verify-${{ github.run_id }}-${{ github.run_attempt }}-resolve
+          path: ${{ runner.temp }}/verification
+          include-hidden-files: true
+
+  apply:
+    needs: resolve
+    if: ${{ !cancelled() && needs.resolve.outputs.matrix != '' && needs.resolve.outputs.matrix != '[]' }}
+    strategy:
+      fail-fast: false
+      # Every stack shares the one saved state, so the deploys go one at a
+      # time, as in sluiceway/examples.
+      max-parallel: 1
+      matrix:
+        include: ${{ fromJson(needs.resolve.outputs.matrix) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    concurrency:
+      group: sluiceway-apply
+      queue: max
+    environment:
+      name: ${{ matrix.environment }}
+      deployment: false
+    env:
+      PULUMI_CONFIG_PASSPHRASE: sluiceway-examples
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: pulumi/actions@v7
+        with:
+          pulumi-version: "{{PULUMI_VERSION}}"
+      - uses: opentofu/setup-opentofu@v2
+        with:
+          tofu_version: "{{TOFU_VERSION}}"
+          tofu_wrapper: false
+
+      - name: Restore the state (stand-in)
+        id: state
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          echo "PULUMI_BACKEND_URL=file://$RUNNER_TEMP/pulumi-state" >> "$GITHUB_ENV"
+          .github/scripts/state.sh restore
+      - name: Create the missing stacks (stand-in)
+        run: .github/scripts/create-missing-stacks.sh
+
+      - id: sluiceway
+        uses: sluiceway/sluiceway@{{SLUICEWAY_REF}}
+        with:
+          mode: apply
+          deployment-id: ${{ matrix.deployment }}
+
+      - name: Save the state (stand-in)
+        if: always() && steps.state.outcome == 'success'
+        run: .github/scripts/state.sh pack
+      - uses: actions/upload-artifact@v7
+        if: always() && steps.state.outcome == 'success'
+        with:
+          name: state-${{ github.run_id }}-${{ github.run_attempt }}-${{ strategy.job-index }}
+          path: ${{ runner.temp }}/state
+          retention-days: 7
+
+      - name: Keep the outputs (verification)
+        if: always()
+        env:
+          OUTCOME: ${{ steps.sluiceway.outcome }}
+          OUTPUTS: ${{ toJSON(steps.sluiceway.outputs) }}
+          RESULT_FILE: ${{ steps.sluiceway.outputs.result-file }}
+        run: .github/scripts/keep-outputs.sh
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: release-verify-${{ github.run_id }}-${{ github.run_attempt }}-apply-${{ strategy.job-index }}
+          path: ${{ runner.temp }}/verification
+          include-hidden-files: true
+
+  settle:
+    needs: [resolve, apply]
+    if: always() && needs.resolve.outputs.matrix != '' && needs.resolve.outputs.matrix != '[]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - id: sluiceway
+        uses: sluiceway/sluiceway@{{SLUICEWAY_REF}}
+        with:
+          mode: settle
+
+      - name: Keep the outputs (verification)
+        if: always()
+        env:
+          OUTCOME: ${{ steps.sluiceway.outcome }}
+          OUTPUTS: ${{ toJSON(steps.sluiceway.outputs) }}
+          RESULT_FILE: ""
+        run: .github/scripts/keep-outputs.sh
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: release-verify-${{ github.run_id }}-${{ github.run_attempt }}-settle
+          path: ${{ runner.temp }}/verification
+          include-hidden-files: true
