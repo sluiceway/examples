@@ -25,12 +25,14 @@ resources:
       content: Release ${version}, build ${build.hex}.
     options:
       version: 0.1.6
-  # A fake value that must never show on the dashboard.
-  canary:
+  # Runs `echo` on the runner at deploy time. NOTE is a fake value that must
+  # never show on the dashboard.
+  announce:
     type: command:local:Command
     properties:
-      create: echo release ready
+      create: echo "release $VERSION ready"
       environment:
+        VERSION: ${version}
         NOTE: CANARY-VALUE
         TOKEN: ${token}
     options:

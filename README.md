@@ -18,13 +18,29 @@ Sluiceway runs one dashboard per repo, with its settings at the repo root. So ev
 | [`pulumi/cloud-oidc/`](pulumi/cloud-oidc/) | A cloud account reached with OIDC, a role that reads for the scan and one that changes things for a deploy. | Later, waits for a sandbox cloud account |
 | `opentofu/`, `terraform/` | The same dashboard with OpenTofu and Terraform stacks next to the Pulumi ones. | Later, when the action supports them |
 
-The workflows are in [`.github/workflows/`](.github/workflows/). [`deploy-dashboard-check.yml`](.github/workflows/deploy-dashboard-check.yml) runs Sluiceway's `check` mode on every pull request: it reads the files and lists the stacks it finds, with no credentials and no tool.
+## The workflows
+
+- [`deploy-dashboard-check.yml`](.github/workflows/deploy-dashboard-check.yml) runs Sluiceway's `check` mode on every pull request: it reads the files and lists the stacks it finds, with no credentials and no tool.
+- [`deploy-dashboard.yml`](.github/workflows/deploy-dashboard.yml) is the whole loop of the action's README, with its four jobs: `scan` after every push to `main`, once a day and on "Run workflow"; `resolve`, `apply` and `settle` when someone ticks a box. The steps marked "stand-in" keep the state in the Actions cache in place of a real backend, and are not part of a normal install.
+
+## The stack that stays pending
+
+`pulumi/plain/release:prod` is kept pending on purpose. Its program is in the repo and it is never deployed, so the dashboard always has a pending row with a box, a preview page and a diff for a visitor to open. Please do not tick it.
+
+## What you can see here that a real repo keeps off
+
+Two settings in [`sluiceway.yaml`](sluiceway.yaml) are on only because every value in this repo is fake:
+
+- **`dashboard.showValues`** lists `environment.GREETING` and `environment.VERSION`, so a change to a greeting or a version shows its old and new value on the row.
+- **`scan.logDiff`** puts the tool's own diff, values included, in the scan's job log. The fake `CANARY-VALUE` shows there on purpose. It still never shows on the dashboard, the summary or a preview page, and `CANARY-SECRET` shows nowhere: the tool prints `[secret]` for it.
+
+In a real repo, read the action's [configuration](https://github.com/sluiceway/sluiceway/blob/main/docs/configuration.md#dashboardshowvalues) and [security](https://github.com/sluiceway/sluiceway/blob/main/docs/security.md#the-tools-own-diff-in-the-job-log) docs before you turn either on.
 
 ## How this repo stays credential-free
 
 - **No cloud.** The programs use the providers `random`, `command` and `local`. They make random names, run `echo` and write a file on the runner.
-- **No state service.** The state lives in a file backend on the runner, kept between runs in the GitHub Actions cache. A real repo uses a bucket or Pulumi Cloud.
-- **A public passphrase.** Stack secrets are encrypted with the passphrase `sluiceway-examples`. It is public on purpose and protects nothing. The one secret value in every stack is the fake string `CANARY-SECRET`, and every program sets one property to the fake string `CANARY-VALUE`. Neither must ever show on the dashboard.
+- **No state service.** The state lives in a file backend on the runner, kept between runs in the GitHub Actions cache. A deploy saves it under a key of its own, and the next scan and deploy restore the newest. Deploys run one at a time, so two never start from the same state. A real repo uses a bucket or Pulumi Cloud. If the cache is ever lost, every stack looks new and is pending again.
+- **A public passphrase.** Stack secrets are encrypted with the passphrase `sluiceway-examples`, which is written in the workflow. It is public on purpose and protects nothing. The one secret value in every stack is the fake string `CANARY-SECRET`, and every program sets one property to the fake string `CANARY-VALUE`. Neither must ever show on the dashboard.
 - **No secrets in the repo settings.** The workflows use the workflow's own `GITHUB_TOKEN` and nothing else.
 
 [`docs/findings.md`](docs/findings.md) lists the rough edges of the action met while building this repo.

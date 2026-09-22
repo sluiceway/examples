@@ -4,12 +4,24 @@
 # Sluiceway still finds every stack and gives each one a row. The whole list
 # of keys is in https://github.com/sluiceway/sluiceway/blob/main/docs/configuration.md
 #
-# Nothing here is about one tool. Pulumi, OpenTofu and Terraform stacks all
-# show on the one dashboard, and their ids come from their directories.
+# Nothing here is about one tool. Only Pulumi is supported today. OpenTofu and
+# Terraform stacks will show on the same dashboard once the action supports
+# them, with ids that come from their directories.
 
 dashboard:
   # The title the dashboard issue gets when Sluiceway first creates it.
   title: Sluiceway examples
+
+  # Off by default, and on here only because every value in this repo is
+  # fake. A changed property at one of these paths shows its old and new
+  # value on the row, the preview page and the summary, and a tick then
+  # approves that value. In a real repo, list only paths whose values you
+  # would put in a public issue: the tool does not know which of your values
+  # are secret unless they are marked so. Read
+  # https://github.com/sluiceway/sluiceway/blob/main/docs/configuration.md#dashboardshowvalues
+  showValues:
+    - environment.GREETING # the greeting of pulumi/plain/greeting
+    - environment.VERSION  # the version of pulumi/plain/release
 
 scan:
   # Files that no program reads. A push that changes only these previews no
@@ -20,3 +32,10 @@ scan:
     - "docs/**"
     - ".github/**"
     - "LICENSE*"
+
+  # Off by default, and on here only because every value in this repo is
+  # fake. Every pending stack's group in the scan's job log then holds the
+  # tool's own diff, values included. In a public repo anyone can read the
+  # job log, and only values the tool marks secret are masked there. Read
+  # https://github.com/sluiceway/sluiceway/blob/main/docs/security.md#the-tools-own-diff-in-the-job-log
+  logDiff: true
