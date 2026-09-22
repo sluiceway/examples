@@ -81,28 +81,33 @@ jobs:
           key: tofu-plugins-${{ runner.os }}-${{ hashFiles('opentofu/**/.terraform.lock.hcl') }}
 
       # Stand-in for a real state backend (a bucket, Pulumi Cloud), not part
-      # of a normal install. The state is kept between runs in the Actions
-      # cache, one cache for both tools: Pulumi's file backend is a directory
-      # on the runner, and OpenTofu's local backend writes terraform.tfstate
-      # (the default workspace) or terraform.tfstate.d/<workspace>/ next to
-      # each module in opentofu/. The scan takes the newest state that a
-      # deploy saved and never saves one itself.
-      - name: Use the file backend (stand-in)
-        # The directory has to exist: a fresh cache restores none.
+      # of a normal install. The state of both tools is kept between runs as
+      # a workflow artifact: Pulumi's file backend is a directory on the
+      # runner, and OpenTofu's local backend writes terraform.tfstate (the
+      # default workspace) or terraform.tfstate.d/<workspace>/ next to each
+      # module in opentofu/. Each deploy saves one, and the scan takes the
+      # newest. Not the Actions cache: a deploy from a tick runs in a job
+      # that an issue edit started, and such a job cannot write the cache.
+      - name: Restore the state (stand-in)
+        id: state
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          mkdir -p "$RUNNER_TEMP/pulumi-state"
           echo "PULUMI_BACKEND_URL=file://$RUNNER_TEMP/pulumi-state" >> "$GITHUB_ENV"
-      - uses: actions/cache/restore@v6
+          .github/scripts/state.sh restore
+      # An artifact expires after 90 days. When no deploy saved one for 30
+      # days, the scan saves the state it restored again, so a quiet repo
+      # keeps its state.
+      - name: Keep the state from expiring (stand-in)
+        if: fromJSON(steps.state.outputs.age-days) >= 30
+        run: .github/scripts/state.sh pack
+      - uses: actions/upload-artifact@v7
+        if: fromJSON(steps.state.outputs.age-days) >= 30
         with:
-          # The same paths in every step: the cache finds an entry only when
-          # the list is the same as when it was saved.
-          path: |
-            ${{ runner.temp }}/pulumi-state
-            opentofu/**/terraform.tfstate
-            opentofu/**/terraform.tfstate.d
-          key: state-${{ github.run_id }}
-          restore-keys: state-
-      # Stand-in too: a fresh cache has no stacks, and a stack config file
+          name: state-${{ github.run_id }}-${{ github.run_attempt }}-scan
+          path: ${{ runner.temp }}/state
+          retention-days: 90
+      # Stand-in too: a fresh state has no stacks, and a stack config file
       # with no stack in the backend is a red row. A real backend already has
       # every stack, so a normal install has no such step. OpenTofu needs no
       # such step: the local backend plans a workspace it does not hold as
@@ -155,7 +160,7 @@ jobs:
     strategy:
       fail-fast: false
       # Stand-in for a real backend: every stack of both tools shares the one
-      # state cache. Two deploys at once would restore the same state and the
+      # saved state. Two deploys at once would restore the same state and the
       # one that saves last would drop the other's deploy. So
       # the deploys of one run go one at a time, and the concurrency group
       # below does the same across runs. A real backend locks each stack on
@@ -209,21 +214,15 @@ jobs:
           path: ${{ runner.temp }}/tofu-plugins
           key: tofu-plugins-${{ runner.os }}-${{ hashFiles('opentofu/**/.terraform.lock.hcl') }}
 
-      # Stand-in for a real state backend, as in the scan job, with the same
-      # paths for both tools.
-      - name: Use the file backend (stand-in)
-        # The directory has to exist: a fresh cache restores none.
+      # Stand-in for a real state backend, as in the scan job: the newest
+      # state that a deploy saved.
+      - name: Restore the state (stand-in)
+        id: state
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          mkdir -p "$RUNNER_TEMP/pulumi-state"
           echo "PULUMI_BACKEND_URL=file://$RUNNER_TEMP/pulumi-state" >> "$GITHUB_ENV"
-      - uses: actions/cache/restore@v6
-        with:
-          path: |
-            ${{ runner.temp }}/pulumi-state
-            opentofu/**/terraform.tfstate
-            opentofu/**/terraform.tfstate.d
-          key: state-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.stack }}
-          restore-keys: state-
+          .github/scripts/state.sh restore
       - name: Create the missing stacks (stand-in)
         run: .github/scripts/create-missing-stacks.sh
 
@@ -244,17 +243,20 @@ jobs:
           mode: apply
           deployment-id: ${{ matrix.deployment }}
 
-      # Stand-in: save the state under a key of its own, also after a failed
-      # deploy, because a deploy that stopped halfway still changed the state.
-      # The next scan and the next deploy restore the newest one.
-      - uses: actions/cache/save@v6
-        if: always()
+      # Stand-in: save the state as an artifact of its own, also after a
+      # failed deploy, because a deploy that stopped halfway still changed the
+      # state. The next scan and the next deploy restore the newest one. Only
+      # when the restore worked: an empty state saved as the newest would
+      # drop every deploy.
+      - name: Save the state (stand-in)
+        if: always() && steps.state.outcome == 'success'
+        run: .github/scripts/state.sh pack
+      - uses: actions/upload-artifact@v7
+        if: always() && steps.state.outcome == 'success'
         with:
-          path: |
-            ${{ runner.temp }}/pulumi-state
-            opentofu/**/terraform.tfstate
-            opentofu/**/terraform.tfstate.d
-          key: state-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.stack }}
+          name: state-${{ github.run_id }}-${{ github.run_attempt }}-${{ strategy.job-index }}
+          path: ${{ runner.temp }}/state
+          retention-days: 90
 
   settle:
     needs: [resolve, apply]

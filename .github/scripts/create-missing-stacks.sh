@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Stand-in for a real state backend, not part of a normal install.
 #
-# This repo keeps its Pulumi state in a file backend that lives in the
-# GitHub Actions cache, and a fresh cache has no stacks. This script creates
+# This repo keeps its Pulumi state in a file backend that a workflow
+# artifact keeps between runs, and a fresh state has no stacks. This script creates
 # every stack that has a stack config file in the repo and is missing in the
 # backend, so that its preview can run. A real backend (a bucket, Pulumi
 # Cloud) already has every stack, and a normal workflow has no such step.
