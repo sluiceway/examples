@@ -1,0 +1,5 @@
+encryptionsalt: v1:TSFTLQ48Ebo=:v1:uWDi8neGPuPV5g8g:fIpVZW4akk/O162/6Vh1wnyIj253dQ==
+config:
+  monorepo-api:version: 1.0.0
+  monorepo-api:token:
+    secure: v1:sSfK1dxgwU1zF+vh:4pEcEi4hViHa3UqQcmEZLtMTx0PTWJ8FANzfOCc=

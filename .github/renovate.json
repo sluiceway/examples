@@ -6,14 +6,48 @@
     ":semanticCommits"
   ],
   "timezone": "Etc/UTC",
-  "schedule": ["before 6am on monday"],
+  "schedule": [
+    "before 6am on monday"
+  ],
   "prConcurrentLimit": 5,
   "packageRules": [
     {
       "description": "The examples teach sluiceway/sluiceway@v0, the moving tag that the action's README tells a new user to copy. Renovate leaves it as it is: no digest pin and no update. A real repo may pin a commit instead, as the action's README says under 'Pin a commit'.",
-      "matchManagers": ["github-actions"],
-      "matchPackageNames": ["sluiceway/sluiceway"],
+      "matchManagers": [
+        "github-actions"
+      ],
+      "matchPackageNames": [
+        "sluiceway/sluiceway"
+      ],
       "enabled": false
+    },
+    {
+      "description": "The npm workspaces at the repo root, for pulumi/monorepo: one pull request for all of their updates, never merged on its own. The check on a pull request runs no preview, so only the scan after the merge shows whether the programs still run. Read the diff and merge by hand.",
+      "matchManagers": [
+        "npm"
+      ],
+      "groupName": "npm workspaces",
+      "automerge": false
+    },
+    {
+      "description": "Pulumi runs the TypeScript programs through ts-node, which works with TypeScript 5. TypeScript 6 stops at the tsconfig option moduleResolution node (TS5107), and TypeScript 7 does not load in ts-node at all, so either one fails every preview.",
+      "matchManagers": [
+        "npm"
+      ],
+      "matchPackageNames": [
+        "typescript"
+      ],
+      "allowedVersions": "<6"
+    },
+    {
+      "description": "The types of Node follow the major version in .nvmrc.",
+      "matchManagers": [
+        "npm"
+      ],
+      "matchPackageNames": [
+        "@types/node"
+      ],
+      "allowedVersions": "<25"
     }
   ]
 }

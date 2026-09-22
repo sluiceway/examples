@@ -1,0 +1,5 @@
+encryptionsalt: v1:Fu00dAckDPU=:v1:gSsuqcfm+3M9672n:4BbQkK1jnV7ZluvKT2ILjvSZZBHm7w==
+config:
+  monorepo-web:title: Example site
+  monorepo-web:token:
+    secure: v1:Iki1Vj60BVybzQ89:Grdy33cXCRNmFLHIIyD0BFobHly1Ny+G78YPBKw=

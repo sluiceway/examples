@@ -1,0 +1,8 @@
+# The project name has to be unique in this repo: the file backend keeps
+# stacks per project name.
+name: monorepo-api
+runtime:
+  name: nodejs
+  options:
+    packagemanager: npm
+description: Makes a build id for a version, named with the shared naming rule. One stack, prod.

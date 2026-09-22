@@ -1,0 +1,11 @@
+{
+  "name": "@sluiceway-examples/web",
+  "private": true,
+  "main": "index.ts",
+  "dependencies": {
+    "@pulumi/command": "1.2.1",
+    "@pulumi/pulumi": "3.263.0",
+    "@pulumi/random": "4.21.2",
+    "@sluiceway-examples/naming": "*"
+  }
+}

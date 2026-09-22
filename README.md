@@ -13,7 +13,7 @@ Sluiceway runs one dashboard per repo, with its settings at the repo root. So ev
 | Directory | What it shows | State |
 |---|---|---|
 | [`pulumi/plain/`](pulumi/plain/) | The simplest install: two Pulumi YAML projects, three stacks, nothing to install. | Here |
-| `pulumi/monorepo/` | TypeScript programs with a shared package, and one `npm ci` at the root for all of them. | Later |
+| [`pulumi/monorepo/`](pulumi/monorepo/) | TypeScript programs with a shared package, and one `npm ci` at the root for all of them. | Here |
 | `pulumi/secret-manager/` | An env file of secret references, loaded and masked with the action's `export-env.sh`. Here with fake references and fake values only. | Later |
 | [`pulumi/cloud-oidc/`](pulumi/cloud-oidc/) | A cloud account reached with OIDC, a role that reads for the scan and one that changes things for a deploy. | Later, waits for a sandbox cloud account |
 | `opentofu/`, `terraform/` | The same dashboard with OpenTofu and Terraform stacks next to the Pulumi ones. | Later, when the action supports them |
@@ -21,7 +21,7 @@ Sluiceway runs one dashboard per repo, with its settings at the repo root. So ev
 ## The workflows
 
 - [`deploy-dashboard-check.yml`](.github/workflows/deploy-dashboard-check.yml) runs Sluiceway's `check` mode on every pull request: it reads the files and lists the stacks it finds, with no credentials and no tool.
-- [`deploy-dashboard.yml`](.github/workflows/deploy-dashboard.yml) is the whole loop of the action's README, with its four jobs: `scan` after every push to `main`, once a day and on "Run workflow"; `resolve`, `apply` and `settle` when someone ticks a box. The steps marked "stand-in" keep the state in the Actions cache in place of a real backend, and are not part of a normal install.
+- [`deploy-dashboard.yml`](.github/workflows/deploy-dashboard.yml) is the whole loop of the action's README, with its four jobs: `scan` after every push to `main`, once a day and on "Run workflow"; `resolve`, `apply` and `settle` when someone ticks a box. The steps marked "stand-in" keep the state in the Actions cache in place of a real backend, and are not part of a normal install. The steps marked "Monorepo" run the one `npm ci` at the root for the TypeScript programs.
 
 ## The stack that stays pending
 

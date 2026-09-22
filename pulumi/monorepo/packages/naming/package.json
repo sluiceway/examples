@@ -1,0 +1,7 @@
+{
+  "name": "@sluiceway-examples/naming",
+  "private": true,
+  "description": "The naming rule that every app of pulumi/monorepo uses.",
+  "main": "index.ts",
+  "types": "index.ts"
+}

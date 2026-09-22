@@ -32,6 +32,9 @@ scan:
     - "docs/**"
     - ".github/**"
     - "LICENSE*"
+  # Kept off this list on purpose: package.json, package-lock.json and .nvmrc
+  # at the root. Every TypeScript program in pulumi/monorepo runs on them, and
+  # no stack claims them, so a change to one of them previews every stack.
 
   # Off by default, and on here only because every value in this repo is
   # fake. Every pending stack's group in the scan's job log then holds the
@@ -39,3 +42,18 @@ scan:
   # job log, and only values the tool marks secret are masked there. Read
   # https://github.com/sluiceway/sluiceway/blob/main/docs/security.md#the-tools-own-diff-in-the-job-log
   logDiff: true
+
+# Settings per stack. Discovery already finds every stack, so these entries
+# only add to stacks that exist.
+stacks:
+  # The two TypeScript apps of pulumi/monorepo import the shared package
+  # packages/naming, which lies outside their directories. A stack claims the
+  # files in its own directory and the ones its inputs name, so each app names
+  # the package here. A push that changes only the package then previews the
+  # three stacks of these two apps and nothing else.
+  - path: pulumi/monorepo/apps/web
+    inputs:
+      - pulumi/monorepo/packages/naming/**
+  - path: pulumi/monorepo/apps/api
+    inputs:
+      - pulumi/monorepo/packages/naming/**
