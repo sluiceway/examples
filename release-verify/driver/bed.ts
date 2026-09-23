@@ -13,6 +13,7 @@ import {
   type Kept,
   keptOutputs,
   labelledIssues,
+  listRuns,
   parseDashboard,
   type Run,
   runLogs,
@@ -111,17 +112,97 @@ export class Bed {
     return this.push(what, edit(new Map(this.tree)));
   }
 
+  // Scenario 22, the change after the tick: a tick on `stack`, then, while
+  // its apply job is held before it starts, a push of `edit`, which waits
+  // for its scan. Then apply goes on.
+  async pushWhileApplyHeld(what: string, stack: string, edit: (files: Tree) => Tree): Promise<Observed> {
+    const since = new Date();
+    await this.hold("apply", true);
+    try {
+      await this.patchBody(stack, (body) => tickBox(body, stack));
+      const run = await this.waitRun((r) => r.event === "issues", since);
+      await this.waitJob(run, (job) => job.name.startsWith("apply") && job.status === "in_progress", "apply held");
+      const sha = await this.commitOnly(what, edit(new Map(this.tree)));
+      const pushed = await this.waitRun((r) => r.event === "push" && r.head_sha === sha, since);
+      await this.waitRun((r) => r.id === pushed.id && r.status === "completed", since);
+    } finally {
+      await this.hold("apply", false);
+    }
+    await waitQuiet(this.github, { expect: (run) => run.event === "issues", since, log: this.log });
+    return this.observe(what, since);
+  }
+
+  // Scenario 22, the stale row: a push of `edit` whose scan is held, then a
+  // tick on the row of `stack` as the scan before it wrote it. The tick's
+  // run ends, then the scan goes on.
+  async tickWhileScanHeld(what: string, stack: string, edit: (files: Tree) => Tree): Promise<Observed> {
+    const since = new Date();
+    await this.hold("scan", true);
+    try {
+      const sha = await this.commitOnly(what, edit(new Map(this.tree)));
+      const pushed = await this.waitRun((r) => r.event === "push" && r.head_sha === sha, since);
+      await this.waitJob(pushed, (job) => job.name === "scan" && job.status === "in_progress", "scan held");
+      await this.patchBody(stack, (body) => tickBox(body, stack));
+      const run = await this.waitRun((r) => r.event === "issues", since);
+      await this.waitRun((r) => r.id === run.id && r.status === "completed", since);
+    } finally {
+      await this.hold("scan", false);
+    }
+    await waitQuiet(this.github, { expect: (run) => run.event === "push", since, log: this.log });
+    return this.observe(what, since);
+  }
+
+  // The branch release-verify-hold-<job> holds that job of the test bed's
+  // workflow at its first step while it exists.
+  private async hold(job: string, on: boolean): Promise<void> {
+    const ref = `release-verify-hold-${job}`;
+    if (on) await this.github.request("POST", repoPath("/git/refs"), { ref: `refs/heads/${ref}`, sha: this.head });
+    else await this.github.request("DELETE", repoPath(`/git/refs/heads/${ref}`), undefined, [404, 422]);
+    this.log(`${on ? "holding" : "released"} ${job}`);
+  }
+
+  // A commit on main that the driver does not wait for.
+  private async commitOnly(what: string, tree: Tree): Promise<string> {
+    const sha = await commit(this.github, tree, `Release verification: ${what}`, this.head);
+    this.log(`pushed ${sha.slice(0, 7)}: ${what} (${changedPaths(this.tree, tree).length} file(s))`);
+    this.tree = tree;
+    this.head = sha;
+    return sha;
+  }
+
+  private async patchBody(what: string, change: (body: string) => string): Promise<void> {
+    const issue = (await labelledIssues(this.github, "sluiceway", "open"))[0];
+    if (!issue) throw new HarnessError("There is no open dashboard to tick.");
+    await this.github.request("PATCH", repoPath(`/issues/${issue.number}`), { body: change(issue.body) });
+    this.log(`ticked ${what}`);
+  }
+
+  // The first run since `since` that `match` takes, once there is one.
+  private async waitRun(match: (run: Run) => boolean, since: Date, minutes = 10): Promise<Run> {
+    const deadline = Date.now() + minutes * 60_000;
+    for (;;) {
+      const run = (await listRuns(this.github)).find((r) => Date.parse(r.created_at) >= since.getTime() - 5_000 && match(r));
+      if (run) return run;
+      if (Date.now() > deadline) throw new HarnessError(`No run as the step expects after ${minutes} minutes.`);
+      await sleep(5_000);
+    }
+  }
+
+  // Waits until a job of `run` is as `match` wants it.
+  private async waitJob(run: Run, match: (job: { name: string; status: string }) => boolean, what: string): Promise<void> {
+    const deadline = Date.now() + 10 * 60_000;
+    for (;;) {
+      const jobs = (await this.github.get<{ jobs: { name: string; status: string }[] }>(repoPath(`/actions/runs/${run.id}/jobs?per_page=100`))).jobs;
+      if (jobs.some(match)) return;
+      if (Date.now() > deadline) throw new HarnessError(`Run ${run.id} never got to "${what}": ${jobs.map((j) => `${j.name} ${j.status}`).join(", ")}.`);
+      await sleep(5_000);
+    }
+  }
+
   // Ticks the rows of `stacks` in one edit of the dashboard, as a person does
   // in the issue, with the driver's own login.
   async tick(what: string, stacks: string[]): Promise<Observed> {
-    return this.editBody(what, stacks.join(", "), (body) => {
-      for (const stack of stacks) {
-        const box = `- [ ] **${stack}** ·`;
-        if (!body.includes(box)) throw new HarnessError(`The dashboard has no empty box for ${stack} to tick.`);
-        body = body.replace(box, `- [x] **${stack}** ·`);
-      }
-      return body;
-    });
+    return this.editBody(what, stacks.join(", "), (body) => stacks.reduce(tickBox, body));
   }
 
   // Ticks the rescan box.
@@ -243,3 +324,10 @@ export class Bed {
 // runs of a step, oldest first.
 export const keptOf = (observed: Observed, job: string): KeptInRun[] =>
   observed.kept.filter((k) => new RegExp(`-${job}(-\\d+)?$`).test(k.artifact));
+
+// The body with the box of `stack` ticked.
+function tickBox(body: string, stack: string): string {
+  const box = `- [ ] **${stack}** ·`;
+  if (!body.includes(box)) throw new HarnessError(`The dashboard has no empty box for ${stack} to tick.`);
+  return body.replace(box, `- [x] **${stack}** ·`);
+}
