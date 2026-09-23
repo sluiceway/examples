@@ -16,7 +16,12 @@ export interface Run {
   created_at: string;
   html_url: string;
   run_attempt: number;
+  // When the newest attempt started. A re-run keeps the run's created_at.
+  run_started_at?: string;
 }
+
+// When a run, or its newest attempt, started.
+export const startedAt = (run: Run): number => Math.max(Date.parse(run.created_at), Date.parse(run.run_started_at ?? run.created_at));
 
 export async function listRuns(github: GitHub): Promise<Run[]> {
   // The newest 100 are enough: a reset starts from none, and a verification
@@ -42,7 +47,7 @@ export async function waitQuiet(github: GitHub, options: WaitOptions): Promise<R
   let quietReads = 0;
   let lastLine = "";
   for (;;) {
-    const runs = (await listRuns(github)).filter((run) => Date.parse(run.created_at) >= since);
+    const runs = (await listRuns(github)).filter((run) => startedAt(run) >= since);
     const started = runs.some(options.expect);
     const open = runs.filter((run) => run.status !== "completed");
     quietReads = started && open.length === 0 ? quietReads + 1 : 0;
@@ -112,10 +117,11 @@ export async function keptOutputs(github: GitHub, run: Run, out: string): Promis
   return kept;
 }
 
-// Every job log of a run, as one text per file of the logs archive.
+// Every job log of a run's newest attempt, as one text per file of the logs
+// archive.
 export async function runLogs(github: GitHub, run: Run, out: string): Promise<Map<string, string>> {
-  const dir = join(out, "logs", String(run.id));
-  unzip(await github.download(repoPath(`/actions/runs/${run.id}/logs`)), dir);
+  const dir = join(out, "logs", `${run.id}-${run.run_attempt}`);
+  unzip(await github.download(repoPath(`/actions/runs/${run.id}/attempts/${run.run_attempt}/logs`)), dir);
   return readTree(dir);
 }
 

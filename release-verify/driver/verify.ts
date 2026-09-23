@@ -2,7 +2,10 @@
 // feeds (docs/release-verification.md, "Order and time"). A step that fails
 // is an error of every scenario it was for, and the scenarios after it that
 // need what it would have left are skipped.
+import { join } from "node:path";
+import { scenario29 } from "./attribution.ts";
 import { Bed, type Observed } from "./bed.ts";
+import { scenario23Cancel, scenario23Rerun } from "./cancel.ts";
 import {
   ADAPTERS,
   ADMIN_STACK,
@@ -21,18 +24,26 @@ import {
 // on a row whose scan is held.
 const MOVED_AFTER_TICK = "pulumi/plain/greeting:prod";
 const MOVED_STALE_ROW = "pulumi/plain/greeting:dev";
-import type { Outcome, Status } from "./check.ts";
+// The stack a pull request changes in 29: deployed in 6, so the range of its
+// attribution starts at that deploy.
+const ATTRIBUTED = "opentofu/site:dev";
+// The stacks of 21: the driver ticks the first, the second account the other.
+const PAIR: Record<Adapter, string> = { Pu: "pulumi/plain/greeting:prod", Tofu: "opentofu/notes" };
+// The stack of 23, whose deploy sleeps for minutes.
+const SLOW_STACK = "pulumi/states/slow:prod";
+import { Check, type Outcome, type Status } from "./check.ts";
 import { HarnessError, pinnedIssues } from "./evidence.ts";
 import { baseTree, overlay, type Tree } from "./fixture.ts";
-import type { GitHub } from "./github.ts";
-import { repoPath } from "./github.ts";
+import { GitHub, repoPath } from "./github.ts";
 import { scenario22 } from "./moved.ts";
 import { scenario30 } from "./names.ts";
+import { scenario21 } from "./pair.ts";
 import { fetchSchema, scenario19 } from "./results.ts";
 import { type Asset, scenario1, scenario2, scenario3, scenario4, scenario4Unclaimed, scenario5 } from "./scans.ts";
 import { scenario24, scenario25, scenario26Back, scenario26Personality, scenario26Redact, scenario28 } from "./settings.ts";
 import { scenario17, scenario18 } from "./signs.ts";
 import { scenario27 } from "./size.ts";
+import { newestState, onlyTickedChanged } from "./state.ts";
 import { scenario6, scenario6Rescan, scenario7 } from "./ticks.ts";
 
 // The stacks one tick per adapter deploys in scenario 6. Scenario 17 then
@@ -49,6 +60,10 @@ export class Verification {
   private readonly observed: Observed[] = [];
   private readonly github: GitHub;
   private readonly bed: Bed;
+  private readonly out: string;
+  // The second account, for two ticks at once (21) and a writer's tick on a
+  // stack with the rule admin (7), when RELEASE_VERIFY_SECOND_TICKER_TOKEN is set.
+  private readonly second: GitHub | undefined;
   private readonly values: Record<string, string>;
   private readonly version: string;
   private readonly log: (line: string) => void;
@@ -59,6 +74,9 @@ export class Verification {
     this.version = values.SLUICEWAY_REF ?? "";
     this.log = log;
     this.bed = new Bed(github, values, out, log);
+    this.out = out;
+    const second = process.env.RELEASE_VERIFY_SECOND_TICKER_TOKEN;
+    this.second = second ? new GitHub(second) : undefined;
   }
 
   // The header pictures the dashboard names, as a browser loads them.
@@ -102,7 +120,7 @@ export class Verification {
 
     // 1 and 3: the first scan on a reset test bed.
     let since = new Date();
-    const first = await this.step([1, 2, 3, 4, 5, 6, 7, 17, 18, 19, 22, 24, 25, 26, 27, 28, 30], ADAPTERS, () => this.bed.push("the base fixtures", baseTree(this.values)));
+    const first = await this.step([1, 2, 3, 4, 5, 6, 7, 17, 18, 19, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30], ADAPTERS, () => this.bed.push("the base fixtures", baseTree(this.values)));
     if (!first) return;
     const pinned = await pinnedIssues(this.github);
     const issue = first.issues[0];
@@ -144,9 +162,19 @@ export class Verification {
     for (const adapter of ADAPTERS) {
       const stack = TICKED[adapter];
       const since = new Date();
+      const stateBefore = await newestState(this.github, join(this.out, "state")).catch(() => undefined);
       const ticked = await this.step([6], [adapter], () => this.bed.tick(`a tick on ${stack}`, [stack]));
       if (!ticked) continue;
       this.add(scenario6(adapter, last, ticked, since, stack, login));
+      // The deploy changed the state of that stack and of no other. The
+      // first deploy of a run has no saved state before it to compare with.
+      if (stateBefore) {
+        const check = new Check(6, [adapter]);
+        const stateAfter = await newestState(this.github, join(this.out, "state"));
+        if (stateAfter) onlyTickedChanged(check, stateBefore, stateAfter, stack);
+        else check.fail(`no saved state after the deploy of ${stack}`);
+        this.add(check.outcomes(ticked.runs.map((r) => r.html_url)));
+      }
       last = ticked;
     }
     const rescan = await this.step([6], ADAPTERS, () => this.bed.dispatch("a full scan after the deploys"));
@@ -171,8 +199,18 @@ export class Verification {
       .then((answer) => answer.role_name, (error: unknown) => (error instanceof Error ? error.message : String(error)));
     if (role !== "admin" && role !== "maintain" && role !== "write") {
       this.mark([7], ["Tofu"], "error", `the role of ${login} on the test bed: ${role}`);
+    } else if (role === "admin" && this.second) {
+      // The second account has Write, so it is the writer the rule refuses.
+      const other = this.second;
+      const otherLogin = (await other.get<{ login: string }>("/user")).login;
+      since = new Date();
+      const below = await this.step([7], ["Tofu"], () => this.bed.tickAs(`a tick on ${ADMIN_STACK} by ${otherLogin}`, ADMIN_STACK, other));
+      if (below) {
+        const why = "the tick rule of this stack is `admin`, which takes admin access to this repository.";
+        this.add(scenario7("Tofu", last, below, since, ADMIN_STACK, otherLogin, why));
+      }
     } else if (role === "admin") {
-      this.mark([7], ["Tofu"], "skipped", `${login}, who ticks, is an admin of the test bed, so the rule admin lets the tick through`);
+      this.mark([7], ["Tofu"], "skipped", `${login}, who ticks, is an admin of the test bed, so the rule admin lets the tick through, and RELEASE_VERIFY_SECOND_TICKER_TOKEN is not set`);
     } else {
       since = new Date();
       const below = await this.step([7], ["Tofu"], () => this.bed.tick(`a tick on ${ADMIN_STACK}`, [ADMIN_STACK]));
@@ -271,6 +309,50 @@ export class Verification {
       since = new Date();
       const moved = await this.step([22], ["Pu"], () => run(`a change that moved, ${when}, on ${stack}`, stack));
       if (moved && before) this.add(scenario22(when, before, moved, since, stack, login));
+    }
+
+    // 29: a pull request merged into a stack deployed from the dashboard.
+    const merged = await this.step([29], ["Tofu"], async () => {
+      const { observed, number } = await this.bed.mergePullRequest(`a new title for ${ATTRIBUTED}`, (files) =>
+        files.set("opentofu/site/dev.tfvars", `${files.get("opentofu/site/dev.tfvars") ?? ""}# Changed in a pull request (release verification, scenario 29).\n`),
+      );
+      this.add(scenario29(observed, ATTRIBUTED, number, login));
+      return observed;
+    });
+    void merged;
+
+    // 21: two ticks within seconds, by two people.
+    if (!this.second) {
+      this.mark([21], ADAPTERS, "skipped", "RELEASE_VERIFY_SECOND_TICKER_TOKEN is not set: two ticks at once need a second account");
+    } else {
+      const other = this.second;
+      const otherLogin = (await other.get<{ login: string }>("/user")).login;
+      since = new Date();
+      const pair = await this.step([21], ADAPTERS, () =>
+        this.bed.tickTwo(`two ticks within seconds, by ${login} and ${otherLogin}`, PAIR.Pu, PAIR.Tofu, other),
+      );
+      if (pair) {
+        this.add(scenario21(pair, since, [
+          { stack: PAIR.Pu, login },
+          { stack: PAIR.Tofu, login: otherLogin },
+        ]));
+      }
+    }
+
+    // 23: a deploy that takes minutes, cancelled while it runs, then
+    // "Re-run failed jobs".
+    const slow = await this.step([23], ["Pu"], () => this.bed.push("a stack whose deploy takes minutes", "slow"));
+    if (slow) {
+      since = new Date();
+      try {
+        const { observed, cancelledAt, runId } = await this.bed.cancelDuringApply(`a cancelled deploy of ${SLOW_STACK}`, SLOW_STACK);
+        this.observed.push(observed);
+        this.add(scenario23Cancel(observed, since, cancelledAt, runId, SLOW_STACK, login));
+        const rerun = await this.step([23], ["Pu"], () => this.bed.rerunFailed(`"Re-run failed jobs" on run ${runId}`, runId));
+        if (rerun) this.add(scenario23Rerun(observed, rerun, since, runId, SLOW_STACK));
+      } catch (error) {
+        this.mark([23], ["Pu"], "error", error instanceof Error ? error.message : String(error));
+      }
     }
 
     // 27: two stacks of 600 changes each, over the size a full scan aims at.
