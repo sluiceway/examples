@@ -69,14 +69,29 @@ async function deleteArtifacts(github: GitHub, log: Log): Promise<void> {
   if (artifacts.length > 0) log(`deleted ${artifacts.length} artifact(s)`);
 }
 
+// A run that was cancelled a moment ago can answer 403 for a while. It is
+// tried again for a minute, then left, and the reset goes on: a run left
+// from before is older than every step's start, so no step reads it.
 async function deleteRuns(github: GitHub, log: Log): Promise<void> {
   let deleted = 0;
+  const left = new Set<number>();
   for (;;) {
-    const runs: Run[] = await listRuns(github);
+    const runs: Run[] = (await listRuns(github)).filter((run) => !left.has(run.id));
     if (runs.length === 0) break;
     for (const run of runs) {
-      await github.request("DELETE", repoPath(`/actions/runs/${run.id}`), undefined, [404]);
-      deleted++;
+      for (let attempt = 1; ; attempt++) {
+        const answer = await github.request("DELETE", repoPath(`/actions/runs/${run.id}`), undefined, [403, 404]);
+        if (answer.status !== 403) {
+          deleted++;
+          break;
+        }
+        if (attempt >= 6) {
+          log(`could not delete run ${run.id}, and left it`);
+          left.add(run.id);
+          break;
+        }
+        await sleep(10_000);
+      }
     }
   }
   if (deleted > 0) log(`deleted ${deleted} run(s)`);

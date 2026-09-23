@@ -16,12 +16,15 @@ export const SCENARIOS: Record<number, string> = {
   17: "Delete and replace signs",
   18: "Failed preview with crate counts",
   19: "Outputs and the result file",
+  21: "Two ticks within seconds, by two people",
   22: "A change that moved before apply",
+  23: "A cancelled deploy, then Re-run failed jobs",
   24: "The rescan box",
   25: "A dashboard closed by hand",
   26: "Dashboard settings redact and personality",
   27: "A body near the size limit",
   28: "No preview pages without checks: write",
+  29: "A merged pull request on the row",
   30: "A hostile name stays plain text",
 };
 
@@ -64,6 +67,7 @@ export const all = (stacks: Record<Adapter, string[]>): string[] => ADAPTERS.fla
 
 export function adapterOf(stack: string): Adapter {
   if (BIG_STACKS.includes(stack)) return "Tofu";
+  if (stack === "pulumi/states/slow:prod") return "Pu";
   const adapter = ADAPTERS.find((a) => BASE_STACKS[a].includes(stack) || BROKEN_STACKS[a].includes(stack));
   if (!adapter) throw new Error(`No adapter holds the stack ${stack}.`);
   return adapter;

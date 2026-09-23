@@ -74,13 +74,14 @@ export function changedPaths(before: Tree, after: Tree): string[] {
 
 const EXECUTABLE = /\.sh$/;
 
-// Makes a commit of the whole tree and moves `main` to it. With no parent it
-// starts a new history, and the move is a force-push.
+// Makes a commit of the whole tree and moves `branch` to it. With no parent
+// it starts a new history, and the move is a force-push.
 export async function commit(
   github: GitHub,
   tree: Tree,
   message: string,
   parent: string | null,
+  branch = "main",
 ): Promise<string> {
   // Every file is text, so the tree call takes the contents and makes the
   // blobs itself: one request for the whole tree.
@@ -97,6 +98,6 @@ export async function commit(
     parents: parent === null ? [] : [parent],
   });
   const sha = commitMade.data.sha;
-  await github.request("PATCH", repoPath("/git/refs/heads/main"), { sha, force: parent === null });
+  await github.request("PATCH", repoPath(`/git/refs/heads/${branch}`), { sha, force: parent === null });
   return sha;
 }

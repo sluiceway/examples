@@ -94,8 +94,10 @@ function agree(check: Check, mode: string, outputs: Record<string, string>, resu
     check.equal(outputs["dashboard-changed"], String(dashboard.changed), `${where}: dashboard-changed and dashboard.changed`);
     check.equal(outputs["dashboard-url"], String(dashboard.url), `${where}: dashboard-url and dashboard.url`);
   } else if (mode === "apply") {
-    check.equal(outputs.outcome, result.outcome, `${where}: the output outcome and outcome`, stack);
-    check.equal(outputs.stack, result.stack, `${where}: the output stack and stack`, stack);
+    // An output apply never set, as on a re-run that refuses before it knows
+    // the stack, says what null says in the result file.
+    check.equal(outputs.outcome ?? null, result.outcome ?? null, `${where}: the output outcome and outcome`, stack);
+    check.equal(outputs.stack ?? null, result.stack ?? null, `${where}: the output stack and stack`, stack);
   }
 }
 

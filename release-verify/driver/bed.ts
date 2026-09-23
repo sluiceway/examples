@@ -17,6 +17,7 @@ import {
   parseDashboard,
   type Run,
   runLogs,
+  startedAt,
   waitQuiet,
 } from "./evidence.ts";
 import { changedPaths, commit, overlay, type Tree } from "./fixture.ts";
@@ -152,6 +153,91 @@ export class Bed {
     return this.observe(what, since);
   }
 
+  // Scenario 23: a tick on `stack`, then "Cancel workflow" on its run once
+  // the record is in progress, which is while the tool deploys. Waits for
+  // settle and for the scan settle starts.
+  async cancelDuringApply(what: string, stack: string): Promise<{ observed: Observed; cancelledAt: Date; runId: number }> {
+    const since = new Date();
+    await this.patchBody(stack, (body) => tickBox(body, stack));
+    const run = await this.waitRun((r) => r.event === "issues", since);
+    const deadline = Date.now() + 10 * 60_000;
+    for (;;) {
+      const records = await this.github.get<{ id: number }[]>(repoPath(`/deployments?task=${encodeURIComponent(`sluiceway:${stack}`)}&per_page=5`));
+      const record = records[0];
+      const statuses = record ? await this.github.get<{ state: string }[]>(repoPath(`/deployments/${record.id}/statuses?per_page=5`)) : [];
+      if (statuses[0]?.state === "in_progress") break;
+      if (Date.now() > deadline) throw new HarnessError(`The record of ${stack} was never in progress.`);
+      await sleep(3_000);
+    }
+    // A few seconds into the deploy, so the tool is running.
+    await sleep(10_000);
+    const cancelledAt = new Date();
+    await this.github.request("POST", repoPath(`/actions/runs/${run.id}/cancel`));
+    this.log(`cancelled run ${run.id}`);
+    await waitQuiet(this.github, { expect: (r) => r.event === "workflow_dispatch", since: cancelledAt, timeoutMinutes: 8, log: this.log });
+    return { observed: await this.observe(what, since), cancelledAt, runId: run.id };
+  }
+
+  // Scenario 23: "Re-run failed jobs" on run `runId`.
+  async rerunFailed(what: string, runId: number): Promise<Observed> {
+    const since = new Date();
+    await this.github.request("POST", repoPath(`/actions/runs/${runId}/rerun-failed-jobs`), {});
+    this.log(`re-ran the failed jobs of run ${runId}`);
+    await waitQuiet(this.github, { expect: (r) => r.id === runId && r.run_attempt > 1, since, log: this.log });
+    return this.observe(what, since);
+  }
+
+  // Scenario 29: a pull request that makes `edit`, opened and merged with a
+  // squash, as a person does. Gives back its number and what the scan of the
+  // merge left.
+  async mergePullRequest(what: string, edit: (files: Tree) => Tree): Promise<{ observed: Observed; number: number }> {
+    const since = new Date();
+    const branch = "release-verify-pull-request";
+    await this.github.request("POST", repoPath("/git/refs"), { ref: `refs/heads/${branch}`, sha: this.head });
+    const tree = edit(new Map(this.tree));
+    await commit(this.github, tree, `Release verification: ${what}`, this.head, branch);
+    const pull = await this.github.request<{ number: number }>("POST", repoPath("/pulls"), {
+      title: `Release verification: ${what}`,
+      head: branch,
+      base: "main",
+      body: "Opened and merged by the release verification of sluiceway/examples (scenario 29).",
+    });
+    const number = pull.data.number;
+    const merged = await this.github.request<{ sha: string }>("PUT", repoPath(`/pulls/${number}/merge`), { merge_method: "squash" });
+    const sha = merged.data.sha;
+    this.log(`merged #${number} as ${sha.slice(0, 7)}: ${what}`);
+    this.tree = tree;
+    this.head = sha;
+    await this.github.request("DELETE", repoPath(`/git/refs/heads/${branch}`), undefined, [404, 422]);
+    await waitQuiet(this.github, { expect: (r) => r.event === "push" && r.head_sha === sha, since, log: this.log });
+    return { observed: await this.observe(what, since), number };
+  }
+
+  // Scenario 21: `first` ticked by the driver, then within seconds `second`
+  // ticked in an edit of its own by another account.
+  async tickTwo(what: string, first: string, second: string, other: GitHub): Promise<Observed> {
+    const since = new Date();
+    await this.patchBody(first, (body) => tickBox(body, first));
+    await sleep(2_000);
+    const issue = (await labelledIssues(other, "sluiceway", "open"))[0];
+    if (!issue) throw new HarnessError("The second account sees no open dashboard.");
+    await other.request("PATCH", repoPath(`/issues/${issue.number}`), { body: tickBox(issue.body, second) });
+    this.log(`ticked ${second} as the second account`);
+    await waitQuiet(this.github, { expect: (r) => r.event === "issues", since, log: this.log });
+    return this.observe(what, since);
+  }
+
+  // A tick by another account on `stack`, in an edit of its own.
+  async tickAs(what: string, stack: string, other: GitHub): Promise<Observed> {
+    const since = new Date();
+    const issue = (await labelledIssues(other, "sluiceway", "open"))[0];
+    if (!issue) throw new HarnessError("The second account sees no open dashboard.");
+    await other.request("PATCH", repoPath(`/issues/${issue.number}`), { body: tickBox(issue.body, stack) });
+    this.log(`ticked ${stack} as the second account`);
+    await waitQuiet(this.github, { expect: (r) => r.event === "issues", since, log: this.log });
+    return this.observe(what, since);
+  }
+
   // The branch release-verify-hold-<job> holds that job of the test bed's
   // workflow at its first step while it exists.
   private async hold(job: string, on: boolean): Promise<void> {
@@ -253,7 +339,7 @@ export class Bed {
     const head = await github.get<{ object: { sha: string } }>(repoPath("/git/ref/heads/main"));
     const sha = head.object.sha;
     const runs = (await github.get<{ workflow_runs: Run[] }>(repoPath("/actions/runs?per_page=100"))).workflow_runs
-      .filter((run) => Date.parse(run.created_at) >= since.getTime() - 5_000)
+      .filter((run) => startedAt(run) >= since.getTime() - 5_000)
       .reverse();
     const kept: KeptInRun[] = [];
     for (const run of runs) {

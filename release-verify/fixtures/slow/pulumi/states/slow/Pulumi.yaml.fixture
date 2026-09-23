@@ -1,0 +1,12 @@
+name: states-slow
+runtime: yaml
+description: >-
+  A deploy that takes minutes, so the release verification can cancel it
+  while it runs (scenario 23). It creates one command that sleeps.
+resources:
+  wait:
+    type: command:local:Command
+    properties:
+      create: sleep 300 && echo "done waiting"
+    options:
+      version: 1.2.1
