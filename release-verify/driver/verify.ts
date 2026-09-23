@@ -3,13 +3,25 @@
 // is an error of every scenario it was for, and the scenarios after it that
 // need what it would have left are skipped.
 import { Bed, type Observed } from "./bed.ts";
-import { ADAPTERS, type Adapter, all, BASE_STACKS, BROKEN_STACKS, GUARDED_STACK } from "./catalogue.ts";
+import {
+  ADAPTERS,
+  ADMIN_STACK,
+  type Adapter,
+  all,
+  BASE_STACKS,
+  BROKEN_STACKS,
+  GUARDED_STACK,
+  GUARDED_TICKER,
+  HOSTILE_STACK,
+} from "./catalogue.ts";
 import type { Outcome, Status } from "./check.ts";
 import { pinnedIssues } from "./evidence.ts";
 import { baseTree } from "./fixture.ts";
 import type { GitHub } from "./github.ts";
+import { repoPath } from "./github.ts";
+import { scenario30 } from "./names.ts";
 import { fetchSchema, scenario19 } from "./results.ts";
-import { scenario1, scenario2, scenario3, scenario4, scenario5 } from "./scans.ts";
+import { type Asset, scenario1, scenario2, scenario3, scenario4, scenario4Unclaimed, scenario5 } from "./scans.ts";
 import { scenario17, scenario18 } from "./signs.ts";
 import { scenario6, scenario6Rescan, scenario7 } from "./ticks.ts";
 
@@ -19,6 +31,8 @@ const TICKED: Record<Adapter, string> = { Pu: "pulumi/plain/greeting:dev", Tofu:
 // The stacks that claim the files the overlays hash-stable and hash-changed
 // change.
 const CLAIMING = ["pulumi/plain/greeting:dev", "pulumi/plain/greeting:prod", "opentofu/site:dev", "opentofu/site:prod"];
+// The file the overlay unclaimed adds, which no stack claims.
+const UNCLAIMED = "shared/settings.json";
 
 export class Verification {
   readonly outcomes: Outcome[] = [];
@@ -35,6 +49,15 @@ export class Verification {
     this.version = values.SLUICEWAY_REF ?? "";
     this.log = log;
     this.bed = new Bed(github, values, out, log);
+  }
+
+  // The header pictures the dashboard names, as a browser loads them.
+  private async assets(o: Observed): Promise<Map<string, Asset>> {
+    const assets = new Map<string, Asset>();
+    for (const url of o.dashboard?.imageUrls ?? []) {
+      if (url.includes("/assets/mascot/") && !assets.has(url)) assets.set(url, await this.github.asset(url));
+    }
+    return assets;
   }
 
   private add(outcomes: Outcome[]): void {
@@ -68,13 +91,22 @@ export class Verification {
     this.log(`ticks are made as ${login}`);
 
     // 1 and 3: the first scan on a reset test bed.
-    const first = await this.step([1, 2, 3, 4, 5, 6, 7, 17, 18, 19], ADAPTERS, () => this.bed.push("the base fixtures", baseTree(this.values)));
+    const first = await this.step([1, 2, 3, 4, 5, 6, 7, 17, 18, 19, 30], ADAPTERS, () => this.bed.push("the base fixtures", baseTree(this.values)));
     if (!first) return;
     const pinned = await pinnedIssues(this.github);
     const issue = first.issues[0];
     const pinProblem = issue && !pinned.some((p) => p.number === issue.number) ? `the dashboard #${issue.number} is not pinned` : undefined;
-    this.add(scenario1(first, base, this.version, pinProblem));
+    this.add(scenario1(first, base, this.version, pinProblem, await this.assets(first)));
     this.add(scenario3(first, base));
+
+    // 30: the hostile name on the dashboard and on its stack's preview page.
+    try {
+      const page = first.pages.find((p) => p.name === `sluiceway / ${HOSTILE_STACK}`);
+      const pageHtml = page ? await this.github.render(`${page.output.summary ?? ""}\n\n${page.output.text ?? ""}`) : undefined;
+      this.add(scenario30(first, pageHtml));
+    } catch (error) {
+      this.mark([30], ["Tofu"], "error", error instanceof Error ? error.message : String(error));
+    }
 
     // 2, 4 and 5: a comment keeps every hash, a new resource moves some.
     const stable = await this.step([2, 4, 5], ADAPTERS, () => this.bed.push("a comment in a Pulumi program and an OpenTofu var file", "hash-stable"));
@@ -92,9 +124,11 @@ export class Verification {
     }
     const docs = await this.step([4], ADAPTERS, () => this.bed.push("a README change", "docs-only"));
     if (docs) this.add(scenario4(changed ?? before, docs, base, [], "after a README change"));
+    const unclaimed = await this.step([4], ADAPTERS, () => this.bed.push("a file that no stack claims", "unclaimed"));
+    if (unclaimed) this.add(scenario4Unclaimed(unclaimed, base, UNCLAIMED));
 
     // 6: one tick per adapter, each in an edit of its own, then a full scan.
-    let last = docs ?? changed ?? before;
+    let last = unclaimed ?? docs ?? changed ?? before;
     const deployed: Adapter[] = [];
     for (const adapter of ADAPTERS) {
       const stack = TICKED[adapter];
@@ -106,13 +140,33 @@ export class Verification {
       last = ticked;
     }
     const rescan = await this.step([6], ADAPTERS, () => this.bed.dispatch("a full scan after the deploys"));
-    if (rescan) for (const adapter of deployed) this.add(scenario6Rescan(adapter, rescan, [TICKED[adapter]]));
+    if (rescan) for (const adapter of deployed) this.add(scenario6Rescan(adapter, last, rescan, [TICKED[adapter]]));
     last = rescan ?? last;
 
-    // 7: a tick the stack's tick rule refuses.
-    const since = new Date();
+    // 7: ticks the stack's tick rule refuses. A list that names someone else,
+    // and the level admin, which a writer lacks.
+    let since = new Date();
     const refused = await this.step([7], ["Pu"], () => this.bed.tick(`a tick on ${GUARDED_STACK}`, [GUARDED_STACK]));
-    if (refused) this.add(scenario7(last, refused, since, GUARDED_STACK, login));
+    if (refused) {
+      const why = `the tick rule of this stack names who can tick it: ${GUARDED_TICKER}.`;
+      this.add(scenario7("Pu", last, refused, since, GUARDED_STACK, login, why));
+      last = refused;
+    }
+    const role = await this.github
+      .get<{ role_name: string }>(repoPath(`/collaborators/${login}/permission`))
+      .then((answer) => answer.role_name, (error: unknown) => (error instanceof Error ? error.message : String(error)));
+    if (role !== "admin" && role !== "maintain" && role !== "write") {
+      this.mark([7], ["Tofu"], "error", `the role of ${login} on the test bed: ${role}`);
+    } else if (role === "admin") {
+      this.mark([7], ["Tofu"], "skipped", `${login}, who ticks, is an admin of the test bed, so the rule admin lets the tick through`);
+    } else {
+      since = new Date();
+      const below = await this.step([7], ["Tofu"], () => this.bed.tick(`a tick on ${ADMIN_STACK}`, [ADMIN_STACK]));
+      if (below) {
+        const why = "the tick rule of this stack is `admin`, which takes admin access to this repository.";
+        this.add(scenario7("Tofu", last, below, since, ADMIN_STACK, login, why));
+      }
+    }
 
     // 17: a delete and a replace on the stacks 6 deployed.
     const notDeployed = ADAPTERS.filter((a) => !deployed.includes(a));

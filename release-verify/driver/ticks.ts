@@ -1,8 +1,9 @@
 // Scenarios 6 and 7: a tick by a person deploys exactly that stack, and a
 // tick by a person the stack's tick rule does not name deploys nothing.
 import { type Deployment, keptOf, type Observed } from "./bed.ts";
-import { type Adapter, GUARDED_TICKER } from "./catalogue.ts";
+import type { Adapter } from "./catalogue.ts";
 import { Check, type Outcome } from "./check.ts";
+import { jobLogs } from "./evidence.ts";
 
 interface MatrixEntry {
   stack?: string;
@@ -67,15 +68,46 @@ export function scenario6(
   check.equal(String(result?.deployment), String(record?.id), "deployment in apply's result file");
   check.equal(keptOf(o, "settle").map((k) => k.outcome), ["success"], "the outcome of settle");
 
-  // The row is in sync, and the trail has the deploy.
+  // The row is in sync, and the first line under Recently deployed is this
+  // deploy, with the ticker and the run of the tick.
   const row = o.dashboard?.rows.get(stack);
   check.equal(row?.state, "in-sync", `the state of ${stack} after the deploy`);
+  check.equal(record?.sha, o.sha, "the commit on the record, the head the tick deployed");
   const run = o.runs.find((r) => r.event === "issues" && r.id === apply?.run.id);
-  const body = o.issues[0]?.body ?? "";
+  const trail = firstTrailLine(o.issues[0]?.body ?? "");
   check.expect(
-    body.includes(`🟢&nbsp;${stack} · ${login} · `) && (run === undefined || body.includes(`](${run.html_url}`)),
-    `expected the trail line "🟢 ${stack} · ${login} · ... · run" with the run of the tick`,
+    trail?.startsWith(`- 🟢&nbsp;${stack} · ${login} · `) === true && run !== undefined && trail.includes(`](${run.html_url}`),
+    `expected the first line under Recently deployed as "🟢 ${stack} · ${login} · ... · run" with the run of the tick, found "${trail}"`,
   );
+
+  // One run for the tick: the edits Sluiceway makes to the body start none.
+  check.equal(o.runs.filter((r) => r.event === "issues").length, 1, "runs started by issue edits during the tick");
+
+  // Before the deploy the row read "waiting to start", then "deploying",
+  // both ticked by the ticker and with no box, in that order.
+  const lines = o.edits.map((edit) => rowLine(edit.body, stack) ?? "");
+  const waiting = lines.findIndex((line) => line.includes(` · waiting to start · ticked by ${login} · `));
+  const deploying = lines.findIndex((line, i) => i > waiting && line.includes(` · deploying · ticked by ${login} · `));
+  check.expect(waiting >= 0, `expected a revision of the body where ${stack} is "waiting to start · ticked by ${login}"`);
+  check.expect(deploying > waiting, `expected a later revision where ${stack} is "deploying · ticked by ${login}"`);
+  for (const at of [waiting, deploying].filter((i) => i >= 0)) {
+    check.expect(!/^- \[[ xX]\] /.test(lines[at] ?? ""), `expected no box on the row while it deploys: ${lines[at]}`);
+  }
+
+  // resolve and settle never run the tool, and apply does.
+  const logs = run ? o.logs.get(run.id) : undefined;
+  if (!logs) check.fail("no job logs of the tick's run to read");
+  else {
+    for (const job of ["resolve", "settle"]) {
+      const texts = jobLogs(logs, job);
+      check.equal(texts.length, 1, `logs of the ${job} job`);
+      check.expect(!texts.some((t) => t.includes("The tool's own words:")), `the ${job} job ran the tool`);
+    }
+    check.expect(
+      jobLogs(logs, "apply").some((t) => t.includes("The tool's own words:")),
+      `expected the tool's own words in the apply job's log, which shows the check above can see a tool run`,
+    );
+  }
 
   // Nothing else moved.
   for (const [other, old] of before.dashboard?.rows ?? []) {
@@ -91,9 +123,16 @@ export function scenario6(
 
 // Scenario 6, last part: a full scan after the deploys previews each ticked
 // stack afresh and finds it in sync, so the deploy really went out and its
-// state was kept.
-export function scenario6Rescan(adapter: Adapter, o: Observed, stacks: string[]): Outcome[] {
+// state was kept. The row is byte for byte the one the deploy left.
+export function scenario6Rescan(adapter: Adapter, before: Observed, o: Observed, stacks: string[]): Outcome[] {
   const check = new Check(6, [adapter]);
+  for (const stack of stacks) {
+    const old = before.dashboard?.rows.get(stack)?.block;
+    check.expect(
+      old !== undefined && o.dashboard?.rows.get(stack)?.block === old,
+      `${stack}: expected its row after the full scan byte for byte as the deploy left it`,
+    );
+  }
   const scan = keptOf(o, "scan")[0];
   const result = scan?.result as { stacks?: { stack: string; state: string }[] } | null;
   for (const stack of stacks) {
@@ -103,14 +142,34 @@ export function scenario6Rescan(adapter: Adapter, o: Observed, stacks: string[])
       `the state of ${stack} in the result file of the full scan after its deploy`,
     );
     check.equal(o.dashboard?.rows.get(stack)?.state, "in-sync", `the state of ${stack} after the full scan`);
-    check.expect(!o.pages.some((page) => page.name === `sluiceway / ${stack}`), `a preview page for ${stack}, in sync`);
+    // The scan writes no page for a stack in sync. A page an earlier scan of
+    // the same commit wrote stays as it was (record 0050, "A page of a stack
+    // that is no longer pending stays as it was on its commit").
+    const scanned = Date.parse(scan?.run.created_at ?? "");
+    const pages = o.pages.filter((page) => page.name === `sluiceway / ${stack}`);
+    check.expect(pages.length <= 1, `${pages.length} preview pages for ${stack} on one commit`);
+    for (const page of pages) {
+      check.expect(
+        Date.parse(page.completed_at ?? "") < scanned,
+        `the full scan wrote a preview page for ${stack}, which is in sync (${page.html_url})`,
+      );
+    }
   }
   return check.outcomes(runUrls(o));
 }
 
-// Scenario 7: a tick on the stack whose rule names only GUARDED_TICKER.
-export function scenario7(before: Observed, o: Observed, since: Date, stack: string, login: string): Outcome[] {
-  const check = new Check(7, ["Pu"]);
+// Scenario 7: a tick that the stack's tick rule refuses. `why` is the
+// sentence of the rule (src/render/refused-ticks.ts).
+export function scenario7(
+  adapter: Adapter,
+  before: Observed,
+  o: Observed,
+  since: Date,
+  stack: string,
+  login: string,
+  why: string,
+): Outcome[] {
+  const check = new Check(7, [adapter]);
   check.equal(matrixOf(o), [], "resolve's matrix");
   check.equal(keptOf(o, "apply").length, 0, "apply jobs");
   check.equal(madeIn(o, since).map((d) => d.task), [], "the deployment records the tick made");
@@ -120,13 +179,28 @@ export function scenario7(before: Observed, o: Observed, since: Date, stack: str
   const comment = comments[0];
   if (comment) {
     check.equal(comment.user.login, "github-actions[bot]", "the author of the comment");
-    for (const part of [`@${login}`, `**${stack}**`, GUARDED_TICKER, "Nothing was started"]) {
-      check.expect(comment.body.includes(part), `expected the comment to hold "${part}", found: ${comment.body}`);
-    }
+    check.equal(
+      comment.body.trim(),
+      `@${login} ticked **${stack}**. The tick was refused: ${why} Nothing was started and the box is cleared.`,
+      "the comment",
+    );
   }
   const row = o.dashboard?.rows.get(stack);
   const old = before.dashboard?.rows.get(stack);
   check.expect(row?.hasBox === true && !row.ticked, `expected the box of ${stack} cleared`);
   check.equal([row?.state, row?.hash], [old?.state, old?.hash], `the state and hash of ${stack}`);
   return check.outcomes(runUrls(o));
+}
+
+// The first line under the Recently deployed heading, or undefined.
+function firstTrailLine(body: string): string | undefined {
+  const lines = body.split(/\r?\n/);
+  const heading = lines.indexOf("## Recently deployed");
+  if (heading < 0) return undefined;
+  return lines.slice(heading + 1).find((line) => line.startsWith("- "));
+}
+
+// The first line of a stack's row in a revision of the body.
+function rowLine(body: string, stack: string): string | undefined {
+  return body.split(/\r?\n/).find((line) => line.includes(`<!-- sluiceway:row stack="${stack}" `));
 }

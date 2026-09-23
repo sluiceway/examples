@@ -29,3 +29,14 @@ resource "terraform_data" "note" {
   }
   triggers_replace = var.token
 }
+
+# A name that GitHub turns into links when it reaches an issue as it is
+# (release verification, scenario 30): an issue reference, a mention, a web
+# address and Markdown emphasis. The mention is @sluiceway, the organisation
+# that owns this repo. GitHub links a mention only when the account exists,
+# so a handle that belongs to nobody would never show whether the name was
+# escaped. A mention of an organisation notifies no person.
+resource "terraform_data" "hostile" {
+  for_each = toset(["#1 @sluiceway www.example.com *x*"])
+  input    = "plain"
+}

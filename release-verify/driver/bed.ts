@@ -15,10 +15,11 @@ import {
   labelledIssues,
   parseDashboard,
   type Run,
+  runLogs,
   waitQuiet,
 } from "./evidence.ts";
 import { changedPaths, commit, overlay, type Tree } from "./fixture.ts";
-import { type GitHub, repoPath } from "./github.ts";
+import { type GitHub, repoPath, sleep } from "./github.ts";
 
 export interface Deployment {
   id: number;
@@ -36,6 +37,13 @@ export interface Comment {
   body: string;
   user: { login: string; type: string };
   created_at: string;
+}
+
+// One revision of the dashboard's body, from the issue's edit history.
+export interface Edit {
+  editedAt: string;
+  editor: string;
+  body: string;
 }
 
 export interface KeptInRun extends Kept {
@@ -56,6 +64,12 @@ export interface Observed {
   pages: CheckRun[];
   deployments: Deployment[];
   comments: Comment[];
+  // The job logs of each run, by run id: file name to text.
+  logs: Map<number, Map<string, string>>;
+  // The dashboard's body as GitHub renders it.
+  html: string | undefined;
+  // The revisions of the body made during the step, oldest first.
+  edits: Edit[];
 }
 
 export class Bed {
@@ -144,10 +158,52 @@ export class Bed {
     const comments = issues[0]
       ? await github.paginate<Comment>(repoPath(`/issues/${issues[0].number}/comments`))
       : [];
-    const observed = { what, sha, runs, kept, issues, dashboard, pages, deployments: withStatuses, comments };
+    const logs = new Map<number, Map<string, string>>();
+    for (const run of runs) {
+      const files = await this.logsOf(run, dir);
+      if (files) logs.set(run.id, files);
+    }
+    const html = issues[0]
+      ? (await github.getAs<{ body_html?: string }>(repoPath(`/issues/${issues[0].number}`), "application/vnd.github.html+json")).body_html
+      : undefined;
+    const edits = issues[0] ? await this.editsSince(issues[0].number, since) : [];
+    const observed = { what, sha, runs, kept, issues, dashboard, pages, deployments: withStatuses, comments, logs, html, edits };
     writeFileSync(join(dir, "dashboard.md"), issues[0]?.body ?? "");
-    writeFileSync(join(dir, "observed.json"), JSON.stringify({ ...observed, dashboard: undefined }, null, 2));
+    writeFileSync(join(dir, "observed.json"), JSON.stringify({ ...observed, dashboard: undefined, logs: undefined }, null, 2));
+    writeFileSync(join(dir, "dashboard.html"), html ?? "");
     return observed;
+  }
+
+  // A run's logs. GitHub sometimes needs a few seconds after a run ends
+  // before the archive is there. A run whose logs never come is left out, and
+  // a scenario that needs them says so.
+  private async logsOf(run: Run, dir: string): Promise<Map<string, string> | undefined> {
+    for (let attempt = 1; attempt <= 4; attempt++) {
+      try {
+        return await runLogs(this.github, run, dir);
+      } catch (error) {
+        if (attempt === 4) this.log(`no logs for run ${run.id}: ${error instanceof Error ? error.message : String(error)}`);
+        else await sleep(attempt * 5_000);
+      }
+    }
+    return undefined;
+  }
+
+  // The body's revisions since `since`, from the edit history. Each one
+  // holds the whole body. GitHub lists them newest first.
+  private async editsSince(issue: number, since: Date): Promise<Edit[]> {
+    const data = await this.github.graphql<{
+      repository: { issue: { userContentEdits: { nodes: { editedAt: string; editor: { login: string } | null; diff: string | null }[] } } };
+    }>(
+      `query($owner: String!, $name: String!, $issue: Int!) {
+        repository(owner: $owner, name: $name) { issue(number: $issue) { userContentEdits(first: 100) { nodes { editedAt editor { login } diff } } } }
+      }`,
+      { issue },
+    );
+    return data.repository.issue.userContentEdits.nodes
+      .filter((edit) => Date.parse(edit.editedAt) >= since.getTime() - 5_000)
+      .map((edit) => ({ editedAt: edit.editedAt, editor: edit.editor?.login ?? "", body: edit.diff ?? "" }))
+      .reverse();
   }
 }
 

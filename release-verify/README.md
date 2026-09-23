@@ -13,7 +13,7 @@ The driver, the fixtures and the scenarios that verify each release of Sluiceway
 | [`driver/bed.ts`](driver/bed.ts) | One step on the test bed (a push, a tick, a dispatch), the wait until it is quiet, and everything read back after it. |
 | [`driver/catalogue.ts`](driver/catalogue.ts) | The scenarios this harness runs, the adapters and the stacks of the fixtures. |
 | [`driver/check.ts`](driver/check.ts) | What a scenario found, per adapter. |
-| [`driver/scans.ts`](driver/scans.ts), [`ticks.ts`](driver/ticks.ts), [`signs.ts`](driver/signs.ts), [`results.ts`](driver/results.ts) | The assertions: scenarios 1 to 5, 6 and 7, 17 and 18, and 19. |
+| [`driver/scans.ts`](driver/scans.ts), [`ticks.ts`](driver/ticks.ts), [`signs.ts`](driver/signs.ts), [`results.ts`](driver/results.ts), [`names.ts`](driver/names.ts) | The assertions: scenarios 1 to 5, 6 and 7, 17 and 18, 19, and 30. |
 | [`driver/summary.ts`](driver/summary.ts) | The table of scenarios by adapter. |
 | [`fixtures/base/`](fixtures/base/) | The first commit of the test bed: the workflow with `{{SLUICEWAY_REF}}` for the tag, `sluiceway.yaml` and the stacks. |
 | `fixtures/<step>/` | An overlay one step lays over the test bed's files. `<file>.delete` takes a file out. |
