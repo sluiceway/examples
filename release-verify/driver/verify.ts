@@ -15,13 +15,14 @@ import {
   HOSTILE_STACK,
 } from "./catalogue.ts";
 import type { Outcome, Status } from "./check.ts";
-import { pinnedIssues } from "./evidence.ts";
-import { baseTree } from "./fixture.ts";
+import { HarnessError, pinnedIssues } from "./evidence.ts";
+import { baseTree, type Tree } from "./fixture.ts";
 import type { GitHub } from "./github.ts";
 import { repoPath } from "./github.ts";
 import { scenario30 } from "./names.ts";
 import { fetchSchema, scenario19 } from "./results.ts";
 import { type Asset, scenario1, scenario2, scenario3, scenario4, scenario4Unclaimed, scenario5 } from "./scans.ts";
+import { scenario24, scenario25, scenario26Back, scenario26Personality, scenario26Redact, scenario28 } from "./settings.ts";
 import { scenario17, scenario18 } from "./signs.ts";
 import { scenario6, scenario6Rescan, scenario7 } from "./ticks.ts";
 
@@ -91,7 +92,8 @@ export class Verification {
     this.log(`ticks are made as ${login}`);
 
     // 1 and 3: the first scan on a reset test bed.
-    const first = await this.step([1, 2, 3, 4, 5, 6, 7, 17, 18, 19, 30], ADAPTERS, () => this.bed.push("the base fixtures", baseTree(this.values)));
+    let since = new Date();
+    const first = await this.step([1, 2, 3, 4, 5, 6, 7, 17, 18, 19, 24, 25, 26, 28, 30], ADAPTERS, () => this.bed.push("the base fixtures", baseTree(this.values)));
     if (!first) return;
     const pinned = await pinnedIssues(this.github);
     const issue = first.issues[0];
@@ -136,16 +138,19 @@ export class Verification {
       const ticked = await this.step([6], [adapter], () => this.bed.tick(`a tick on ${stack}`, [stack]));
       if (!ticked) continue;
       this.add(scenario6(adapter, last, ticked, since, stack, login));
-      if (ticked.dashboard?.rows.get(stack)?.state === "in-sync") deployed.push(adapter);
       last = ticked;
     }
     const rescan = await this.step([6], ADAPTERS, () => this.bed.dispatch("a full scan after the deploys"));
+    // What went out, whichever run deployed it: 17 builds on these.
+    for (const adapter of ADAPTERS) {
+      if ((rescan ?? last).dashboard?.rows.get(TICKED[adapter])?.state === "in-sync") deployed.push(adapter);
+    }
     if (rescan) for (const adapter of deployed) this.add(scenario6Rescan(adapter, last, rescan, [TICKED[adapter]]));
     last = rescan ?? last;
 
     // 7: ticks the stack's tick rule refuses. A list that names someone else,
     // and the level admin, which a writer lacks.
-    let since = new Date();
+    since = new Date();
     const refused = await this.step([7], ["Pu"], () => this.bed.tick(`a tick on ${GUARDED_STACK}`, [GUARDED_STACK]));
     if (refused) {
       const why = `the tick rule of this stack names who can tick it: ${GUARDED_TICKER}.`;
@@ -179,6 +184,66 @@ export class Verification {
     // 18: a stack per adapter whose preview fails on purpose.
     const broken = await this.step([18], ADAPTERS, () => this.bed.push("a preview that fails on purpose", "broken-preview"));
     if (broken) this.add(scenario18(broken, all(BROKEN_STACKS)));
+    const everyStack = [...base, ...all(BROKEN_STACKS)];
+
+    // 25: the dashboard closed by hand, then a push.
+    try {
+      const closed = await this.bed.closeDashboard();
+      const reopened = await this.step([25], ADAPTERS, () =>
+        this.bed.pushEdit("a README change after the dashboard was closed", (files) =>
+          files.set("README.md", `${files.get("README.md") ?? ""}\nThe dashboard was closed by hand before this change.\n`),
+        ),
+      );
+      if (reopened) {
+        const pins = (await pinnedIssues(this.github)).map((p) => p.number);
+        this.add(scenario25(reopened, closed, pins));
+      }
+    } catch (error) {
+      this.mark([25], ADAPTERS, "error", error instanceof Error ? error.message : String(error));
+    }
+
+    // 24: the rescan box.
+    const beforeRescan = this.observed.at(-1);
+    since = new Date();
+    const rescanned = await this.step([24], ADAPTERS, () => this.bed.tickRescan("a tick on the rescan box"));
+    if (rescanned && beforeRescan) this.add(scenario24(beforeRescan, rescanned, since, everyStack, login));
+
+    // 26: redact, then personality off, then both taken out.
+    const config = "sluiceway.yaml";
+    const setting = (line: string) => (files: Tree) =>
+      files.set(config, (files.get(config) ?? "").replace("dashboard:\n", `dashboard:\n  ${line}\n`));
+    const redacted = await this.step([26], ADAPTERS, () => this.bed.pushEdit("dashboard.redact: true", setting("redact: true")));
+    if (redacted) this.add(scenario26Redact(redacted));
+    const plain = await this.step([26], ADAPTERS, () =>
+      this.bed.pushEdit("dashboard.personality: false", (files) =>
+        files.set(config, (files.get(config) ?? "").replace("  redact: true\n", "  personality: false\n")),
+      ),
+    );
+    if (plain) this.add(scenario26Personality(plain));
+    const back = await this.step([26], ADAPTERS, () =>
+      this.bed.pushEdit("the dashboard settings taken out", (files) =>
+        files.set(config, (files.get(config) ?? "").replace("  personality: false\n", "")),
+      ),
+    );
+    if (back) this.add(scenario26Back(back));
+
+    // 28: the scan job without checks: write, then "Run workflow", then the
+    // permission put back.
+    const workflow = ".github/workflows/deploy-dashboard.yml";
+    const withoutChecks = await this.step([28], ADAPTERS, async () => {
+      await this.bed.pushEdit("the workflow without checks: write", (files) => {
+        const text = files.get(workflow) ?? "";
+        if (!text.includes("  checks: write\n")) throw new HarnessError(`${workflow} has no "checks: write" to take out.`);
+        return files.set(workflow, text.replace("  checks: write\n", ""));
+      });
+      return this.bed.dispatch("a full scan without checks: write");
+    });
+    if (withoutChecks) this.add(scenario28(withoutChecks));
+    await this.step([28], ADAPTERS, () =>
+      this.bed.pushEdit("checks: write put back", (files) =>
+        files.set(workflow, (files.get(workflow) ?? "").replace("  pull-requests: read\n", "  pull-requests: read\n  checks: write\n")),
+      ),
+    );
 
     // 19: every result file of every step.
     try {

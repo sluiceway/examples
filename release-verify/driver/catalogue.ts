@@ -16,6 +16,10 @@ export const SCENARIOS: Record<number, string> = {
   17: "Delete and replace signs",
   18: "Failed preview with crate counts",
   19: "Outputs and the result file",
+  24: "The rescan box",
+  25: "A dashboard closed by hand",
+  26: "Dashboard settings redact and personality",
+  28: "No preview pages without checks: write",
   30: "A hostile name stays plain text",
 };
 

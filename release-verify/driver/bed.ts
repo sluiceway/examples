@@ -106,22 +106,54 @@ export class Bed {
     return this.observe(what, since);
   }
 
+  // Pushes the files of the test bed as `edit` changes them.
+  async pushEdit(what: string, edit: (files: Tree) => Tree): Promise<Observed> {
+    return this.push(what, edit(new Map(this.tree)));
+  }
+
   // Ticks the rows of `stacks` in one edit of the dashboard, as a person does
   // in the issue, with the driver's own login.
   async tick(what: string, stacks: string[]): Promise<Observed> {
+    return this.editBody(what, stacks.join(", "), (body) => {
+      for (const stack of stacks) {
+        const box = `- [ ] **${stack}** ·`;
+        if (!body.includes(box)) throw new HarnessError(`The dashboard has no empty box for ${stack} to tick.`);
+        body = body.replace(box, `- [x] **${stack}** ·`);
+      }
+      return body;
+    });
+  }
+
+  // Ticks the rescan box.
+  async tickRescan(what: string): Promise<Observed> {
+    return this.editBody(what, "the rescan box", (body) => {
+      const box = "- [ ] Rescan all stacks <!-- sluiceway:rescan -->";
+      if (!body.includes(box)) throw new HarnessError("The dashboard has no empty rescan box to tick.");
+      return body.replace(box, "- [x] Rescan all stacks <!-- sluiceway:rescan -->");
+    });
+  }
+
+  // One edit of the dashboard's body, then the wait for the run it starts
+  // and every run that one starts.
+  private async editBody(what: string, ticked: string, change: (body: string) => string): Promise<Observed> {
     const issue = (await labelledIssues(this.github, "sluiceway", "open"))[0];
     if (!issue) throw new HarnessError("There is no open dashboard to tick.");
-    let body = issue.body;
-    for (const stack of stacks) {
-      const box = `- [ ] **${stack}** ·`;
-      if (!body.includes(box)) throw new HarnessError(`The dashboard has no empty box for ${stack} to tick.`);
-      body = body.replace(box, `- [x] **${stack}** ·`);
-    }
+    const body = change(issue.body);
     const since = new Date();
     await this.github.request("PATCH", repoPath(`/issues/${issue.number}`), { body });
-    this.log(`ticked ${stacks.join(", ")}`);
+    this.log(`ticked ${ticked}`);
     await waitQuiet(this.github, { expect: (run) => run.event === "issues", since, log: this.log });
     return this.observe(what, since);
+  }
+
+  // Closes the dashboard by hand, as a person does with "Close issue", and
+  // keeps its label. Closing starts no run: the workflow listens to edits.
+  async closeDashboard(): Promise<number> {
+    const issue = (await labelledIssues(this.github, "sluiceway", "open"))[0];
+    if (!issue) throw new HarnessError("There is no open dashboard to close.");
+    await this.github.request("PATCH", repoPath(`/issues/${issue.number}`), { state: "closed", state_reason: "completed" });
+    this.log(`closed the dashboard #${issue.number}`);
+    return issue.number;
   }
 
   // Starts the workflow with "Run workflow", which is a full scan.
