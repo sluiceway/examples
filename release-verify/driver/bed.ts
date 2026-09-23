@@ -15,10 +15,11 @@ import {
   labelledIssues,
   parseDashboard,
   type Run,
+  runLogs,
   waitQuiet,
 } from "./evidence.ts";
 import { changedPaths, commit, overlay, type Tree } from "./fixture.ts";
-import { type GitHub, repoPath } from "./github.ts";
+import { type GitHub, repoPath, sleep } from "./github.ts";
 
 export interface Deployment {
   id: number;
@@ -36,6 +37,13 @@ export interface Comment {
   body: string;
   user: { login: string; type: string };
   created_at: string;
+}
+
+// One revision of the dashboard's body, from the issue's edit history.
+export interface Edit {
+  editedAt: string;
+  editor: string;
+  body: string;
 }
 
 export interface KeptInRun extends Kept {
@@ -56,6 +64,12 @@ export interface Observed {
   pages: CheckRun[];
   deployments: Deployment[];
   comments: Comment[];
+  // The job logs of each run, by run id: file name to text.
+  logs: Map<number, Map<string, string>>;
+  // The dashboard's body as GitHub renders it.
+  html: string | undefined;
+  // The revisions of the body made during the step, oldest first.
+  edits: Edit[];
 }
 
 export class Bed {
@@ -92,22 +106,54 @@ export class Bed {
     return this.observe(what, since);
   }
 
+  // Pushes the files of the test bed as `edit` changes them.
+  async pushEdit(what: string, edit: (files: Tree) => Tree): Promise<Observed> {
+    return this.push(what, edit(new Map(this.tree)));
+  }
+
   // Ticks the rows of `stacks` in one edit of the dashboard, as a person does
   // in the issue, with the driver's own login.
   async tick(what: string, stacks: string[]): Promise<Observed> {
+    return this.editBody(what, stacks.join(", "), (body) => {
+      for (const stack of stacks) {
+        const box = `- [ ] **${stack}** ·`;
+        if (!body.includes(box)) throw new HarnessError(`The dashboard has no empty box for ${stack} to tick.`);
+        body = body.replace(box, `- [x] **${stack}** ·`);
+      }
+      return body;
+    });
+  }
+
+  // Ticks the rescan box.
+  async tickRescan(what: string): Promise<Observed> {
+    return this.editBody(what, "the rescan box", (body) => {
+      const box = "- [ ] Rescan all stacks <!-- sluiceway:rescan -->";
+      if (!body.includes(box)) throw new HarnessError("The dashboard has no empty rescan box to tick.");
+      return body.replace(box, "- [x] Rescan all stacks <!-- sluiceway:rescan -->");
+    });
+  }
+
+  // One edit of the dashboard's body, then the wait for the run it starts
+  // and every run that one starts.
+  private async editBody(what: string, ticked: string, change: (body: string) => string): Promise<Observed> {
     const issue = (await labelledIssues(this.github, "sluiceway", "open"))[0];
     if (!issue) throw new HarnessError("There is no open dashboard to tick.");
-    let body = issue.body;
-    for (const stack of stacks) {
-      const box = `- [ ] **${stack}** ·`;
-      if (!body.includes(box)) throw new HarnessError(`The dashboard has no empty box for ${stack} to tick.`);
-      body = body.replace(box, `- [x] **${stack}** ·`);
-    }
+    const body = change(issue.body);
     const since = new Date();
     await this.github.request("PATCH", repoPath(`/issues/${issue.number}`), { body });
-    this.log(`ticked ${stacks.join(", ")}`);
+    this.log(`ticked ${ticked}`);
     await waitQuiet(this.github, { expect: (run) => run.event === "issues", since, log: this.log });
     return this.observe(what, since);
+  }
+
+  // Closes the dashboard by hand, as a person does with "Close issue", and
+  // keeps its label. Closing starts no run: the workflow listens to edits.
+  async closeDashboard(): Promise<number> {
+    const issue = (await labelledIssues(this.github, "sluiceway", "open"))[0];
+    if (!issue) throw new HarnessError("There is no open dashboard to close.");
+    await this.github.request("PATCH", repoPath(`/issues/${issue.number}`), { state: "closed", state_reason: "completed" });
+    this.log(`closed the dashboard #${issue.number}`);
+    return issue.number;
   }
 
   // Starts the workflow with "Run workflow", which is a full scan.
@@ -144,10 +190,52 @@ export class Bed {
     const comments = issues[0]
       ? await github.paginate<Comment>(repoPath(`/issues/${issues[0].number}/comments`))
       : [];
-    const observed = { what, sha, runs, kept, issues, dashboard, pages, deployments: withStatuses, comments };
+    const logs = new Map<number, Map<string, string>>();
+    for (const run of runs) {
+      const files = await this.logsOf(run, dir);
+      if (files) logs.set(run.id, files);
+    }
+    const html = issues[0]
+      ? (await github.getAs<{ body_html?: string }>(repoPath(`/issues/${issues[0].number}`), "application/vnd.github.html+json")).body_html
+      : undefined;
+    const edits = issues[0] ? await this.editsSince(issues[0].number, since) : [];
+    const observed = { what, sha, runs, kept, issues, dashboard, pages, deployments: withStatuses, comments, logs, html, edits };
     writeFileSync(join(dir, "dashboard.md"), issues[0]?.body ?? "");
-    writeFileSync(join(dir, "observed.json"), JSON.stringify({ ...observed, dashboard: undefined }, null, 2));
+    writeFileSync(join(dir, "observed.json"), JSON.stringify({ ...observed, dashboard: undefined, logs: undefined }, null, 2));
+    writeFileSync(join(dir, "dashboard.html"), html ?? "");
     return observed;
+  }
+
+  // A run's logs. GitHub sometimes needs a few seconds after a run ends
+  // before the archive is there. A run whose logs never come is left out, and
+  // a scenario that needs them says so.
+  private async logsOf(run: Run, dir: string): Promise<Map<string, string> | undefined> {
+    for (let attempt = 1; attempt <= 4; attempt++) {
+      try {
+        return await runLogs(this.github, run, dir);
+      } catch (error) {
+        if (attempt === 4) this.log(`no logs for run ${run.id}: ${error instanceof Error ? error.message : String(error)}`);
+        else await sleep(attempt * 5_000);
+      }
+    }
+    return undefined;
+  }
+
+  // The body's revisions since `since`, from the edit history. Each one
+  // holds the whole body. GitHub lists them newest first.
+  private async editsSince(issue: number, since: Date): Promise<Edit[]> {
+    const data = await this.github.graphql<{
+      repository: { issue: { userContentEdits: { nodes: { editedAt: string; editor: { login: string } | null; diff: string | null }[] } } };
+    }>(
+      `query($owner: String!, $name: String!, $issue: Int!) {
+        repository(owner: $owner, name: $name) { issue(number: $issue) { userContentEdits(first: 100) { nodes { editedAt editor { login } diff } } } }
+      }`,
+      { issue },
+    );
+    return data.repository.issue.userContentEdits.nodes
+      .filter((edit) => Date.parse(edit.editedAt) >= since.getTime() - 5_000)
+      .map((edit) => ({ editedAt: edit.editedAt, editor: edit.editor?.login ?? "", body: edit.diff ?? "" }))
+      .reverse();
   }
 }
 

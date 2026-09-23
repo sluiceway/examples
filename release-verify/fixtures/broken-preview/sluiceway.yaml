@@ -18,9 +18,12 @@ stacks:
     options:
       workspace: dev
       varFiles: [dev.tfvars]
+  # Only an admin may tick site:prod. A tick by a writer is refused with a
+  # comment (release verification, scenario 7).
   - path: opentofu/site
     name: prod
     tool: opentofu
+    tickers: admin
     options:
       workspace: prod
       varFiles: [prod.tfvars]

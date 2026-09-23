@@ -3,13 +3,26 @@
 // is an error of every scenario it was for, and the scenarios after it that
 // need what it would have left are skipped.
 import { Bed, type Observed } from "./bed.ts";
-import { ADAPTERS, type Adapter, all, BASE_STACKS, BROKEN_STACKS, GUARDED_STACK } from "./catalogue.ts";
+import {
+  ADAPTERS,
+  ADMIN_STACK,
+  type Adapter,
+  all,
+  BASE_STACKS,
+  BROKEN_STACKS,
+  GUARDED_STACK,
+  GUARDED_TICKER,
+  HOSTILE_STACK,
+} from "./catalogue.ts";
 import type { Outcome, Status } from "./check.ts";
-import { pinnedIssues } from "./evidence.ts";
-import { baseTree } from "./fixture.ts";
+import { HarnessError, pinnedIssues } from "./evidence.ts";
+import { baseTree, type Tree } from "./fixture.ts";
 import type { GitHub } from "./github.ts";
+import { repoPath } from "./github.ts";
+import { scenario30 } from "./names.ts";
 import { fetchSchema, scenario19 } from "./results.ts";
-import { scenario1, scenario2, scenario3, scenario4, scenario5 } from "./scans.ts";
+import { type Asset, scenario1, scenario2, scenario3, scenario4, scenario4Unclaimed, scenario5 } from "./scans.ts";
+import { scenario24, scenario25, scenario26Back, scenario26Personality, scenario26Redact, scenario28 } from "./settings.ts";
 import { scenario17, scenario18 } from "./signs.ts";
 import { scenario6, scenario6Rescan, scenario7 } from "./ticks.ts";
 
@@ -19,6 +32,8 @@ const TICKED: Record<Adapter, string> = { Pu: "pulumi/plain/greeting:dev", Tofu:
 // The stacks that claim the files the overlays hash-stable and hash-changed
 // change.
 const CLAIMING = ["pulumi/plain/greeting:dev", "pulumi/plain/greeting:prod", "opentofu/site:dev", "opentofu/site:prod"];
+// The file the overlay unclaimed adds, which no stack claims.
+const UNCLAIMED = "shared/settings.json";
 
 export class Verification {
   readonly outcomes: Outcome[] = [];
@@ -35,6 +50,15 @@ export class Verification {
     this.version = values.SLUICEWAY_REF ?? "";
     this.log = log;
     this.bed = new Bed(github, values, out, log);
+  }
+
+  // The header pictures the dashboard names, as a browser loads them.
+  private async assets(o: Observed): Promise<Map<string, Asset>> {
+    const assets = new Map<string, Asset>();
+    for (const url of o.dashboard?.imageUrls ?? []) {
+      if (url.includes("/assets/mascot/") && !assets.has(url)) assets.set(url, await this.github.asset(url));
+    }
+    return assets;
   }
 
   private add(outcomes: Outcome[]): void {
@@ -68,13 +92,23 @@ export class Verification {
     this.log(`ticks are made as ${login}`);
 
     // 1 and 3: the first scan on a reset test bed.
-    const first = await this.step([1, 2, 3, 4, 5, 6, 7, 17, 18, 19], ADAPTERS, () => this.bed.push("the base fixtures", baseTree(this.values)));
+    let since = new Date();
+    const first = await this.step([1, 2, 3, 4, 5, 6, 7, 17, 18, 19, 24, 25, 26, 28, 30], ADAPTERS, () => this.bed.push("the base fixtures", baseTree(this.values)));
     if (!first) return;
     const pinned = await pinnedIssues(this.github);
     const issue = first.issues[0];
     const pinProblem = issue && !pinned.some((p) => p.number === issue.number) ? `the dashboard #${issue.number} is not pinned` : undefined;
-    this.add(scenario1(first, base, this.version, pinProblem));
+    this.add(scenario1(first, base, this.version, pinProblem, await this.assets(first)));
     this.add(scenario3(first, base));
+
+    // 30: the hostile name on the dashboard and on its stack's preview page.
+    try {
+      const page = first.pages.find((p) => p.name === `sluiceway / ${HOSTILE_STACK}`);
+      const pageHtml = page ? await this.github.render(`${page.output.summary ?? ""}\n\n${page.output.text ?? ""}`) : undefined;
+      this.add(scenario30(first, pageHtml));
+    } catch (error) {
+      this.mark([30], ["Tofu"], "error", error instanceof Error ? error.message : String(error));
+    }
 
     // 2, 4 and 5: a comment keeps every hash, a new resource moves some.
     const stable = await this.step([2, 4, 5], ADAPTERS, () => this.bed.push("a comment in a Pulumi program and an OpenTofu var file", "hash-stable"));
@@ -92,9 +126,11 @@ export class Verification {
     }
     const docs = await this.step([4], ADAPTERS, () => this.bed.push("a README change", "docs-only"));
     if (docs) this.add(scenario4(changed ?? before, docs, base, [], "after a README change"));
+    const unclaimed = await this.step([4], ADAPTERS, () => this.bed.push("a file that no stack claims", "unclaimed"));
+    if (unclaimed) this.add(scenario4Unclaimed(unclaimed, base, UNCLAIMED));
 
     // 6: one tick per adapter, each in an edit of its own, then a full scan.
-    let last = docs ?? changed ?? before;
+    let last = unclaimed ?? docs ?? changed ?? before;
     const deployed: Adapter[] = [];
     for (const adapter of ADAPTERS) {
       const stack = TICKED[adapter];
@@ -102,17 +138,40 @@ export class Verification {
       const ticked = await this.step([6], [adapter], () => this.bed.tick(`a tick on ${stack}`, [stack]));
       if (!ticked) continue;
       this.add(scenario6(adapter, last, ticked, since, stack, login));
-      if (ticked.dashboard?.rows.get(stack)?.state === "in-sync") deployed.push(adapter);
       last = ticked;
     }
     const rescan = await this.step([6], ADAPTERS, () => this.bed.dispatch("a full scan after the deploys"));
-    if (rescan) for (const adapter of deployed) this.add(scenario6Rescan(adapter, rescan, [TICKED[adapter]]));
+    // What went out, whichever run deployed it: 17 builds on these.
+    for (const adapter of ADAPTERS) {
+      if ((rescan ?? last).dashboard?.rows.get(TICKED[adapter])?.state === "in-sync") deployed.push(adapter);
+    }
+    if (rescan) for (const adapter of deployed) this.add(scenario6Rescan(adapter, last, rescan, [TICKED[adapter]]));
     last = rescan ?? last;
 
-    // 7: a tick the stack's tick rule refuses.
-    const since = new Date();
+    // 7: ticks the stack's tick rule refuses. A list that names someone else,
+    // and the level admin, which a writer lacks.
+    since = new Date();
     const refused = await this.step([7], ["Pu"], () => this.bed.tick(`a tick on ${GUARDED_STACK}`, [GUARDED_STACK]));
-    if (refused) this.add(scenario7(last, refused, since, GUARDED_STACK, login));
+    if (refused) {
+      const why = `the tick rule of this stack names who can tick it: ${GUARDED_TICKER}.`;
+      this.add(scenario7("Pu", last, refused, since, GUARDED_STACK, login, why));
+      last = refused;
+    }
+    const role = await this.github
+      .get<{ role_name: string }>(repoPath(`/collaborators/${login}/permission`))
+      .then((answer) => answer.role_name, (error: unknown) => (error instanceof Error ? error.message : String(error)));
+    if (role !== "admin" && role !== "maintain" && role !== "write") {
+      this.mark([7], ["Tofu"], "error", `the role of ${login} on the test bed: ${role}`);
+    } else if (role === "admin") {
+      this.mark([7], ["Tofu"], "skipped", `${login}, who ticks, is an admin of the test bed, so the rule admin lets the tick through`);
+    } else {
+      since = new Date();
+      const below = await this.step([7], ["Tofu"], () => this.bed.tick(`a tick on ${ADMIN_STACK}`, [ADMIN_STACK]));
+      if (below) {
+        const why = "the tick rule of this stack is `admin`, which takes admin access to this repository.";
+        this.add(scenario7("Tofu", last, below, since, ADMIN_STACK, login, why));
+      }
+    }
 
     // 17: a delete and a replace on the stacks 6 deployed.
     const notDeployed = ADAPTERS.filter((a) => !deployed.includes(a));
@@ -125,6 +184,66 @@ export class Verification {
     // 18: a stack per adapter whose preview fails on purpose.
     const broken = await this.step([18], ADAPTERS, () => this.bed.push("a preview that fails on purpose", "broken-preview"));
     if (broken) this.add(scenario18(broken, all(BROKEN_STACKS)));
+    const everyStack = [...base, ...all(BROKEN_STACKS)];
+
+    // 25: the dashboard closed by hand, then a push.
+    try {
+      const closed = await this.bed.closeDashboard();
+      const reopened = await this.step([25], ADAPTERS, () =>
+        this.bed.pushEdit("a README change after the dashboard was closed", (files) =>
+          files.set("README.md", `${files.get("README.md") ?? ""}\nThe dashboard was closed by hand before this change.\n`),
+        ),
+      );
+      if (reopened) {
+        const pins = (await pinnedIssues(this.github)).map((p) => p.number);
+        this.add(scenario25(reopened, closed, pins));
+      }
+    } catch (error) {
+      this.mark([25], ADAPTERS, "error", error instanceof Error ? error.message : String(error));
+    }
+
+    // 24: the rescan box.
+    const beforeRescan = this.observed.at(-1);
+    since = new Date();
+    const rescanned = await this.step([24], ADAPTERS, () => this.bed.tickRescan("a tick on the rescan box"));
+    if (rescanned && beforeRescan) this.add(scenario24(beforeRescan, rescanned, since, everyStack, login));
+
+    // 26: redact, then personality off, then both taken out.
+    const config = "sluiceway.yaml";
+    const setting = (line: string) => (files: Tree) =>
+      files.set(config, (files.get(config) ?? "").replace("dashboard:\n", `dashboard:\n  ${line}\n`));
+    const redacted = await this.step([26], ADAPTERS, () => this.bed.pushEdit("dashboard.redact: true", setting("redact: true")));
+    if (redacted) this.add(scenario26Redact(redacted));
+    const plain = await this.step([26], ADAPTERS, () =>
+      this.bed.pushEdit("dashboard.personality: false", (files) =>
+        files.set(config, (files.get(config) ?? "").replace("  redact: true\n", "  personality: false\n")),
+      ),
+    );
+    if (plain) this.add(scenario26Personality(plain));
+    const back = await this.step([26], ADAPTERS, () =>
+      this.bed.pushEdit("the dashboard settings taken out", (files) =>
+        files.set(config, (files.get(config) ?? "").replace("  personality: false\n", "")),
+      ),
+    );
+    if (back) this.add(scenario26Back(back));
+
+    // 28: the scan job without checks: write, then "Run workflow", then the
+    // permission put back.
+    const workflow = ".github/workflows/deploy-dashboard.yml";
+    const withoutChecks = await this.step([28], ADAPTERS, async () => {
+      await this.bed.pushEdit("the workflow without checks: write", (files) => {
+        const text = files.get(workflow) ?? "";
+        if (!text.includes("  checks: write\n")) throw new HarnessError(`${workflow} has no "checks: write" to take out.`);
+        return files.set(workflow, text.replace("  checks: write\n", ""));
+      });
+      return this.bed.dispatch("a full scan without checks: write");
+    });
+    if (withoutChecks) this.add(scenario28(withoutChecks));
+    await this.step([28], ADAPTERS, () =>
+      this.bed.pushEdit("checks: write put back", (files) =>
+        files.set(workflow, (files.get(workflow) ?? "").replace("  pull-requests: read\n", "  pull-requests: read\n  checks: write\n")),
+      ),
+    );
 
     // 19: every result file of every step.
     try {

@@ -119,6 +119,30 @@ export async function runLogs(github: GitHub, run: Run, out: string): Promise<Ma
   return readTree(dir);
 }
 
+// The log of one job, by the job's name as the workflow gives it (scan,
+// resolve, settle, or apply, whose matrix jobs carry more in their names),
+// with the time stamps taken off. The archive holds one file per job at its
+// top, named "<n>_<job name>.txt".
+export function jobLogs(logs: Map<string, string>, job: string): string[] {
+  const texts: string[] = [];
+  for (const [name, text] of logs) {
+    if (name.includes("/")) continue;
+    const title = /^\d+_(.*)\.txt$/.exec(name)?.[1] ?? "";
+    if (title === job || title.startsWith(`${job} (`)) texts.push(text.replace(/^\S+Z /gm, ""));
+  }
+  return texts;
+}
+
+// The lines of the log group titled `title`, or undefined when the log has no
+// such group.
+export function logGroup(log: string, title: string): string[] | undefined {
+  const lines = log.split(/\r?\n/);
+  const start = lines.indexOf(`##[group]${title}`);
+  if (start < 0) return undefined;
+  const end = lines.indexOf("##[endgroup]", start);
+  return lines.slice(start + 1, end < 0 ? undefined : end);
+}
+
 export interface Issue {
   number: number;
   node_id: string;
@@ -156,6 +180,7 @@ export interface CheckRun {
   conclusion: string | null;
   head_sha: string;
   html_url: string;
+  completed_at: string | null;
   output: { title: string | null; summary: string | null; text: string | null };
 }
 

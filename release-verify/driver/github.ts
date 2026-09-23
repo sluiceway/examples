@@ -29,6 +29,9 @@ function checkTarget(method: string, path: string): void {
   // An entry that ends in a slash is a prefix, any other one is the path.
   const read = (entry: string) => (entry.endsWith("/") ? path.startsWith(entry) : path === entry);
   if (method === "GET" && ACTION_READS.some(read)) return;
+  // GitHub's Markdown renderer. `render` always sends the test bed as the
+  // context, and the call changes nothing.
+  if (method === "POST" && path === "/markdown") return;
   throw new TargetError(`Refused ${method} ${path}: the driver only writes to ${TEST_BED_REPO}.`);
 }
 
@@ -119,6 +122,35 @@ export class GitHub {
       all.push(...items);
       if (items.length < 100) return all;
     }
+  }
+
+  // A read with another media type, such as
+  // application/vnd.github.html+json for an issue's body as GitHub renders it.
+  async getAs<T = unknown>(path: string, accept: string): Promise<T> {
+    checkTarget("GET", path.split("?")[0] ?? path);
+    this.requests++;
+    const response = await send(`${API}${path}`, { headers: this.headers({ accept }) });
+    const text = await response.text();
+    if (!response.ok) throw new Error(`GET ${path}: ${response.status} ${text.slice(0, 500)}`);
+    return safeJson(text) as T;
+  }
+
+  // Markdown as GitHub renders it in the test bed: its issue references,
+  // mentions and autolinks, as on a page of the repo.
+  async render(text: string): Promise<string> {
+    const answer = await this.request<string>("POST", "/markdown", { text, mode: "gfm", context: TEST_BED_REPO });
+    return String(answer.data ?? "");
+  }
+
+  // A file of the action at a tag, as a browser loads it: the header pictures.
+  // No token goes with it, and nothing else is fetched.
+  async asset(url: string): Promise<{ status: number; type: string; text: string }> {
+    if (!url.startsWith(`https://raw.githubusercontent.com/${ACTION_REPO}/`)) {
+      throw new TargetError(`Refused GET ${url}: not a file of ${ACTION_REPO}.`);
+    }
+    this.requests++;
+    const response = await send(url, { headers: { "user-agent": "sluiceway-release-verify" } });
+    return { status: response.status, type: response.headers.get("content-type") ?? "", text: await response.text() };
   }
 
   // A zip file behind an API path, such as a run's logs or an artifact.

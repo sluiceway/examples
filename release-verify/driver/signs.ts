@@ -3,7 +3,7 @@
 import type { Observed } from "./bed.ts";
 import { ADAPTERS } from "./catalogue.ts";
 import { Check, type Outcome } from "./check.ts";
-import { count } from "./evidence.ts";
+import { count, jobLogs, logGroup } from "./evidence.ts";
 import { pushScan, type ScanResult } from "./scans.ts";
 
 const runUrls = (o: Observed): string[] => o.runs.map((run) => run.html_url);
@@ -75,6 +75,18 @@ export function scenario18(o: Observed, broken: string[]): Outcome[] {
       check.expect(!(row?.block ?? "").includes(words), `${stack}: the tool's words "${words}" are on the row`, stack);
     }
     check.expect(!o.pages.some((page) => page.name === `sluiceway / ${stack}`), `${stack}: a preview page for a failed preview`, stack);
+
+    // The row's run link leads to a scan whose log has a group for the stack
+    // with the reason and the tool's own words.
+    const runId = Number(/\[run\]\(https:\/\/github\.com\/[^)]*\/actions\/runs\/(\d+)/.exec(row?.firstLine ?? "")?.[1]);
+    const logs = o.logs.get(runId);
+    const group = logs ? jobLogs(logs, "scan").map((log) => logGroup(log, stack)).find((g) => g !== undefined) : undefined;
+    const words = group?.indexOf("The tool's own words:") ?? -1;
+    check.expect(
+      group?.some((line) => line.startsWith("preview failed: ")) === true && words >= 0 && (group?.length ?? 0) > words + 1,
+      `${stack}: expected the run the row links (${runId || "none"}) to have a log group "${stack}" with "preview failed: " and the tool's own words`,
+      stack,
+    );
     check.equal(
       result?.stacks?.find((entry) => entry.stack === stack)?.state,
       "preview-failed",

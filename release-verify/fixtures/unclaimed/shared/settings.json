@@ -1,0 +1,3 @@
+{
+  "note": "A file that no stack claims and scan.unrelated does not list, so a push of it gives a full scan (release verification, scenario 4)."
+}

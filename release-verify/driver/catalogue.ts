@@ -16,6 +16,11 @@ export const SCENARIOS: Record<number, string> = {
   17: "Delete and replace signs",
   18: "Failed preview with crate counts",
   19: "Outputs and the result file",
+  24: "The rescan box",
+  25: "A dashboard closed by hand",
+  26: "Dashboard settings redact and personality",
+  28: "No preview pages without checks: write",
+  30: "A hostile name stays plain text",
 };
 
 // The stacks of the base fixtures, by adapter. The scratch stack is ignored.
@@ -38,6 +43,16 @@ export const TITLE = "Sluiceway release verification";
 // tick on it is refused (scenario 7).
 export const GUARDED_STACK = "pulumi/plain/release:prod";
 export const GUARDED_TICKER = "example-release-manager";
+
+// site:prod may only be ticked by an admin, so a tick by a writer is refused
+// (scenario 7, for OpenTofu). A tick by an admin is not, and then that part
+// is skipped.
+export const ADMIN_STACK = "opentofu/site:prod";
+
+// The resource name of opentofu/notes that GitHub would turn into links
+// (scenario 30), and the stack that holds it.
+export const HOSTILE_NAME = "#1 @sluiceway www.example.com *x*";
+export const HOSTILE_STACK = "opentofu/notes";
 
 export const all = (stacks: Record<Adapter, string[]>): string[] => ADAPTERS.flatMap((adapter) => stacks[adapter]);
 

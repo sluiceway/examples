@@ -3,7 +3,7 @@
 import { keptOf, type Observed } from "./bed.ts";
 import { ADAPTERS, IGNORED, TITLE } from "./catalogue.ts";
 import { Check, type Outcome } from "./check.ts";
-import { count } from "./evidence.ts";
+import { count, jobLogs, logGroup } from "./evidence.ts";
 
 export interface ScanResult {
   mode?: string;
@@ -22,10 +22,61 @@ export function pushScan(o: Observed) {
 export const resultStacks = (result: ScanResult | null | undefined): string[] | undefined =>
   result?.stacks?.map((entry) => entry.stack).sort();
 
-const runUrls = (o: Observed): string[] => o.runs.map((run) => run.html_url);
+export const runUrls = (o: Observed): string[] => o.runs.map((run) => run.html_url);
+
+// The log of the scan job of the step's push run.
+export function scanLog(o: Observed): string | undefined {
+  const { run } = pushScan(o);
+  const logs = run ? o.logs.get(run.id) : undefined;
+  return logs ? jobLogs(logs, "scan")[0] : undefined;
+}
+
+export interface Asset {
+  status: number;
+  type: string;
+  text: string;
+}
+
+// The header: a <picture> whose dark source and light image are files of the
+// tag, both served as SVG, both animated. The pictures animate with CSS
+// keyframes, not with <animate> (0 of the tag's SVGs hold one).
+function header(check: Check, body: string, assets: Map<string, Asset>): void {
+  const picture = /<picture>\s*<source media="\(prefers-color-scheme: dark\)" srcset="([^"]+-dark\.svg)">\s*<img alt="[^"]*" width="880" src="([^"]+-light\.svg)">\s*<\/picture>/.exec(body);
+  if (!picture) {
+    check.fail("expected the header as a <picture> with a prefers-color-scheme: dark source and a light image");
+    return;
+  }
+  for (const url of [picture[1] ?? "", picture[2] ?? ""]) {
+    const asset = assets.get(url);
+    check.equal(asset?.status, 200, `the answer for ${url}`);
+    check.expect(asset?.type.startsWith("image/svg+xml") === true, `${url}: expected image/svg+xml, found ${asset?.type}`);
+    check.expect(asset?.text.includes("<svg") === true && asset.text.includes("@keyframes"), `${url}: expected an SVG that animates with @keyframes`);
+  }
+}
+
+// The scan's job log: one group per previewed stack, titled with its id, and
+// the count of requests, far below GitHub's 1,000 an hour.
+function scanLogLines(check: Check, log: string | undefined, previewed: string[]): void {
+  if (log === undefined) {
+    check.fail("no job log of the scan to read");
+    return;
+  }
+  for (const stack of previewed) {
+    check.expect(logGroup(log, stack) !== undefined, `${stack}: expected a log group titled with its id in the scan's log`, stack);
+  }
+  const requests = /The scan made (\d+) requests? to the GitHub API\./.exec(log)?.[1];
+  check.expect(requests !== undefined, 'expected "The scan made N requests to the GitHub API." in the scan\'s log');
+  check.expect(Number(requests) < 1000, `expected fewer than 1,000 requests to the GitHub API, found ${requests}`);
+}
 
 // Scenario 1, on the first push to a reset test bed.
-export function scenario1(o: Observed, stacks: string[], version: string, pinned: string | undefined): Outcome[] {
+export function scenario1(
+  o: Observed,
+  stacks: string[],
+  version: string,
+  pinned: string | undefined,
+  assets: Map<string, Asset>,
+): Outcome[] {
   const check = new Check(1, ADAPTERS);
   if (pinned) check.fail(pinned);
   const { run, kept, result } = pushScan(o);
@@ -78,6 +129,24 @@ export function scenario1(o: Observed, stacks: string[], version: string, pinned
   for (const entry of result?.stacks ?? []) {
     check.equal(entry.state, "pending", `the state of ${entry.stack} in the result file`, entry.stack);
   }
+  header(check, issue.body, assets);
+  scanLogLines(check, scanLog(o), stacks);
+  return check.outcomes(runUrls(o));
+}
+
+// Scenario 4, last part: a push of a file that no stack claims and that
+// scan.unrelated does not list gives a full scan, and the log says why.
+export function scenario4Unclaimed(o: Observed, stacks: string[], file: string): Outcome[] {
+  const check = new Check(4, ADAPTERS);
+  const { kept, result } = pushScan(o);
+  check.equal(kept?.outcome, "success", "the outcome of the Sluiceway step after a file no stack claims");
+  check.equal(resultStacks(result), [...stacks].sort(), "the stacks previewed after a file no stack claims");
+  pages(check, o, stacks);
+  const log = scanLog(o);
+  const line = `This is a full scan. A push gives a narrowed scan, and this one fell back to a full scan: no stack claims ${file}.`;
+  check.expect(log?.includes(line) === true, `expected the log line "${line}"`);
+  const group = log === undefined ? undefined : logGroup(log, "Changed files that no stack claims");
+  check.expect(group?.includes(`unclaimed: ${file}`) === true, `expected "unclaimed: ${file}" in the log group "Changed files that no stack claims"`);
   return check.outcomes(runUrls(o));
 }
 
