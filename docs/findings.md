@@ -149,6 +149,32 @@ The entries on the first dashboard and on the first scan with pulumi/monorepo na
 
 The driver ran against `v0.26.1` (`f7f894d`), the newest release, on 2026-09-22 from 22:48 to 23:00 UTC: 19 of 19 passed, for Pulumi and OpenTofu, in 228 requests. It was a local run with the owner's `gh` login, which also made the ticks, since `RELEASE_VERIFY_BOT_TOKEN` does not exist yet. The same run passed against `v0.26.0` an hour earlier. The runs: [scan](https://github.com/sluiceway/release-verify/actions/runs/35794379953) (1, 3), [comment](https://github.com/sluiceway/release-verify/actions/runs/35794590439) (2, 5), [narrowed](https://github.com/sluiceway/release-verify/actions/runs/35794692202) (4), [tick](https://github.com/sluiceway/release-verify/actions/runs/35795010373) (6), [refused tick](https://github.com/sluiceway/release-verify/actions/runs/35795096874) (7), [delete and replace](https://github.com/sluiceway/release-verify/actions/runs/35795160744) (17), [failed preview](https://github.com/sluiceway/release-verify/actions/runs/35795228428) (18, 19). The next reset deletes them.
 
+## 2026-09-23: a change pushed after the tick is not caught, and the row says in sync
+
+Scenario 22 of the release verification, against `v0.26.1` (2026-09-23, 09:17 UTC, a local run; the runs are deleted by the next reset):
+
+1. The owner ticked `pulumi/plain/greeting:prod` on commit `b610bd9`, with the row's diff hash `8c646f4f47547dbc`. `resolve` opened record 6610501391 on `b610bd9`.
+2. The test bed's `apply` job waited at its first step, and the driver pushed `653a73a`, which adds a resource to `pulumi/plain/greeting/Pulumi.yaml`, a file `greeting:prod` claims. The scan of that push ran and ended while `apply` waited, and left the row as deploying.
+3. Then `apply` ran. It checked out `b610bd9`, the commit of the `issues` event, previewed it, found the approved hash, and deployed. The record ended `success`, `outcome` was `deployed`, and the row became **in sync**, with no comment.
+
+The dashboard then said `greeting:prod` was in sync while `main` held a change to it that was never deployed or previewed. It stayed so until the next scan that previewed the stack, here the next push two minutes later, and otherwise the daily scan.
+
+- **The records say this is caught.** `docs/adr/0008-the-diff-hash-covers-exactly-what-the-row-shows.md:5` describes a merge "before the apply job starts" whose change deploys, and `docs/adr/0052-a-repo-may-list-the-paths-whose-values-appear.md:32` says "A merge that moves it to `17.0.5` after the tick gives another hash, so `apply` refuses it as moved". The acceptance checklist's item 9 expects the same. In the split workflow `apply` checks out the event's commit, the head when the box was ticked, so a merge after that never reaches its fresh preview (`src/core/deploy-gate.ts:95-98` compares the hash of that commit).
+- **What went out is what was approved**, so nothing unsafe deployed. The problem is the row: `apply` writes an in-sync row for the deployed commit without looking at the head, and the scan of the newer push saw a deploying row and left it.
+- A fix could be: `apply`, or `settle`, compares the record's commit with the head of the default branch, and when a newer commit changes a file the stack claims, writes the row as pending or starts a scan. Or the records and the checklist say that a merge after the tick deploys the ticked commit and shows up at the next scan.
+
+The other path of scenario 22 passes at `v0.26.1`: a tick on a row whose newer push was not scanned yet (the scan held) ends as "the change moved since the tick", with `apply` red, the comment and the row back with the new hash and its failure line.
+
+## 2026-09-23: a narrowed scan that retries only failed previews goes red as a broken environment
+
+In the same run, two pushes that changed only `.github/workflows/deploy-dashboard.yml` gave narrowed scans that previewed the two stacks whose preview fails on purpose, and nothing else (`opentofu/broken is previewed: its row is a preview failure.`). Both failed again, and the job went red with:
+
+```text
+Every preview failed (2 of 2). That nearly always means the environment is broken, such as missing credentials or a backend that cannot be reached. …
+```
+
+`src/modes/scan.ts:580-583` (`everyPreviewFailed`) counts the stacks previewed again only because their row was already a failure. Six stacks were fine and carried through. With one stack that stays broken, every push that claims no other stack turns the scan red and blames the environment. The rule could count only the stacks previewed for a change, or leave out the ones whose row was a failure before.
+
 ## 2026-09-23: a resource name becomes an issue link and a mention
 
 Scenario 30 of the release verification gives an OpenTofu resource the name `#1 @sluiceway www.example.com *x*` (a `for_each` key in `opentofu/notes`) and reads what GitHub renders, at `v0.26.1`:
@@ -190,7 +216,7 @@ The action's `docs/acceptance.md` at `v0.26.0` has 60 unticked items. Each one i
 | Needs a person | 24 | No runner can prove it. |
 | **Total** | **60** | |
 
-Of the 9 new scenarios below, 24, 25, 26 and 28 are built and pass at `v0.26.1`; 21, 22, 23, 27 and 29 are not built yet. What the system takes over, and what it costs: the 8 automated items and the scenario part of the 15 split ones need 9 new scenarios and new assertions in 7 existing or planned ones (listed under [What the verification has to grow](#what-the-verification-has-to-grow)). That adds about 70 minutes of wall time and about 150 runner minutes to one verification, on top of the 2 hours and 345 runner minutes of the catalogue. Both repos are public, so it costs runner queue time and no money. It needs one more user account, for two tickers at once.
+Of the 9 new scenarios below, 24, 25, 26, 27 and 28 are built and pass at `v0.26.1`, 22 is built and fails there with a finding, and 21, 23 and 29 are not built yet. What the system takes over, and what it costs: the 8 automated items and the scenario part of the 15 split ones need 9 new scenarios and new assertions in 7 existing or planned ones (listed under [What the verification has to grow](#what-the-verification-has-to-grow)). That adds about 70 minutes of wall time and about 150 runner minutes to one verification, on top of the 2 hours and 345 runner minutes of the catalogue. Both repos are public, so it costs runner queue time and no money. It needs one more user account, for two tickers at once.
 
 What stays with a person, grouped so each group is one sitting:
 
@@ -213,7 +239,7 @@ What stays with a person, grouped so each group is one sitting:
 | 6 | The bot's own edits start no run | 1 | Covered | 6, at `v0.26.1` | One tick gives one run with event `issues`; the edits Sluiceway makes during the deploy start none (record 0017). |
 | 7 | Two people tick two rows within seconds; each deploy names its own ticker | 1 | Automated | New: two tickers | Two records, each with its own ticker, each trail line with its login. Needs a second test account. |
 | 8 | A writer ticks a stack whose `tickers` is `admin`; refused with one comment | 1 | Automated | 7, built | `opentofu/site:prod` has `tickers: admin`, and scenario 7 checks the comment word for word (`src/render/refused-ticks.ts:81-82`), the box cleared, no record. Skipped in local runs: the owner, who ticks there, is an admin. It runs once the test bot, with Write, ticks. |
-| 9 | A merge between the tick and `apply`; nothing deploys, row shows the new diff | 1 | Automated | New: moved change | No `success` record, `apply` red, the moved comment (`src/render/moved-comment.ts:19`), the row's failure line `the change moved since the tick`. Needs a pause before `apply`. |
+| 9 | A merge between the tick and `apply`; nothing deploys, row shows the new diff | 1 | Automated | 22, fails at `v0.26.1` | Scenario 22 holds `apply` after the tick and pushes a change to the stack. It fails: `apply` deploys the commit of the tick and the row says in sync, see [the finding](#2026-09-23-a-change-pushed-after-the-tick-is-not-caught-and-the-row-says-in-sync). The code's moved path, a tick on a row whose newer commit is not scanned yet, passes at `v0.26.1`: record `error` "the change moved since the tick", `apply` red, the comment, the row pending with the new hash and the failure line. |
 | 10 | Cancel during `apply`; within a minute the row says the run ended without a result | 1 | Automated | New: cancelled deploy | Cancel through the API, then within 60 s the row reads `the run ended without a result` (`src/core/failure-reason.ts:95`). Needs a deploy that takes minutes. |
 | 11 | "Re-run failed jobs"; nothing deploys, the summary says to tick again | 1 | Split | New: cancelled deploy | Scenario: re-run through the API, no new `success` record, the log line `A re-run never deploys` (`src/modes/apply.ts:242`). Person: the summary, which no API reads. |
 | 12 | Tick the rescan box; a full scan runs and the box is clear | 1 | Covered | 24, at `v0.26.1` | One `issues` run and one dispatched run whose scan previews every stack, the `resolve` log lines, the box clear after, no record. |
@@ -241,7 +267,7 @@ What stays with a person, grouped so each group is one sitting:
 | 34 | Five in sync rows, and the preview is empty | 3 | Split | 1, 6, at `v0.26.1` | Scenario part passed: after a deploy a full scan finds the row in sync with no preview page. Person: five rows against the wrapper. |
 | 35 | No property value on any row, summary, page or log line | 3 | Split | 20, leak check (planned) | Scenario: the four fake strings, base64 too, in no body, edit, comment, page, record, result file or log. Person: one search for one real secret, which no fixture has. |
 | 36 | Every preview failure links to a log that explains it; fixed reason | 3 | Covered | 18, at `v0.26.1` | The fixed reason on the row, and the run it links has a log group for that stack with `preview failed: <reason>` and the tool's own words. |
-| 37 | Body under 58,000 characters, or the shortened-rows note with working links | 3 | Split | New: size budget | Scenario: a stack with hundreds of changes, a body at most 65,536 with the note, its links answer 200 (`src/render/budget.ts:49,56`). Person: read the size from the private repo's log line. |
+| 37 | Body under 58,000 characters, or the shortened-rows note with working links | 3 | Split | 27, at `v0.26.1` | Scenario part passed: two stacks of 600 changes give a full scan's body over the target; the body comes out at most 58,000 characters, the same number as the log line, only the big rows are shortened, the note and the log count them, the preview links are pages that list every change, and the summary links are runs GitHub knows (`src/render/budget.ts:49,56`, `src/render/voice.ts:79-84`). Person: read the size from the private repo's log line. |
 | 38 | Write down the scan timings | 3 | Needs a person | | Setup: the numbers mean something only on the private repo's runners. |
 | 39 | Set `concurrency` and `preview-timeout` from them | 3 | Needs a person | | Setup: a choice for 1 CPU runners. The defaults are `action.yml:27,33`. |
 | 40 | A merge to one app previews it, and the `inputs` stack with it | 3 | Split | 4 (#19), 4 with `Pm` (planned) | Covered: a change previews only the stacks that claim it. Planned: a claim through `inputs`. Person: one merge on the private repo, to check its own `inputs`. |

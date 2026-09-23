@@ -35,6 +35,19 @@ jobs:
       # Public on purpose: every secret in this repo is fake.
       PULUMI_CONFIG_PASSPHRASE: sluiceway-examples
     steps:
+      # Waits while the branch release-verify-hold-scan exists, at most ten
+      # minutes, so the driver can change the repo between two jobs
+      # (release verification, scenario 22). Without the branch it goes on
+      # at once.
+      - name: Hold (verification)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for i in $(seq 1 60); do
+            gh api "repos/${{ github.repository }}/git/ref/heads/release-verify-hold-scan" --silent 2>/dev/null || exit 0
+            echo "Held by the release verification ($i)."
+            sleep 10
+          done
       - uses: actions/checkout@v7
 
       - uses: pulumi/actions@v7
@@ -121,6 +134,19 @@ jobs:
     env:
       PULUMI_CONFIG_PASSPHRASE: sluiceway-examples
     steps:
+      # Waits while the branch release-verify-hold-apply exists, at most ten
+      # minutes, so the driver can change the repo between two jobs
+      # (release verification, scenario 22). Without the branch it goes on
+      # at once.
+      - name: Hold (verification)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for i in $(seq 1 60); do
+            gh api "repos/${{ github.repository }}/git/ref/heads/release-verify-hold-apply" --silent 2>/dev/null || exit 0
+            echo "Held by the release verification ($i)."
+            sleep 10
+          done
       - uses: actions/checkout@v7
 
       - uses: pulumi/actions@v7

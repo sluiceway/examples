@@ -9,21 +9,30 @@ import {
   type Adapter,
   all,
   BASE_STACKS,
+  BIG_CHANGES,
+  BIG_STACKS,
   BROKEN_STACKS,
   GUARDED_STACK,
   GUARDED_TICKER,
   HOSTILE_STACK,
 } from "./catalogue.ts";
+
+// The stacks scenario 22 ticks: one while a push lands before its apply, one
+// on a row whose scan is held.
+const MOVED_AFTER_TICK = "pulumi/plain/greeting:prod";
+const MOVED_STALE_ROW = "pulumi/plain/greeting:dev";
 import type { Outcome, Status } from "./check.ts";
 import { HarnessError, pinnedIssues } from "./evidence.ts";
-import { baseTree, type Tree } from "./fixture.ts";
+import { baseTree, overlay, type Tree } from "./fixture.ts";
 import type { GitHub } from "./github.ts";
 import { repoPath } from "./github.ts";
+import { scenario22 } from "./moved.ts";
 import { scenario30 } from "./names.ts";
 import { fetchSchema, scenario19 } from "./results.ts";
 import { type Asset, scenario1, scenario2, scenario3, scenario4, scenario4Unclaimed, scenario5 } from "./scans.ts";
 import { scenario24, scenario25, scenario26Back, scenario26Personality, scenario26Redact, scenario28 } from "./settings.ts";
 import { scenario17, scenario18 } from "./signs.ts";
+import { scenario27 } from "./size.ts";
 import { scenario6, scenario6Rescan, scenario7 } from "./ticks.ts";
 
 // The stacks one tick per adapter deploys in scenario 6. Scenario 17 then
@@ -93,7 +102,7 @@ export class Verification {
 
     // 1 and 3: the first scan on a reset test bed.
     let since = new Date();
-    const first = await this.step([1, 2, 3, 4, 5, 6, 7, 17, 18, 19, 24, 25, 26, 28, 30], ADAPTERS, () => this.bed.push("the base fixtures", baseTree(this.values)));
+    const first = await this.step([1, 2, 3, 4, 5, 6, 7, 17, 18, 19, 22, 24, 25, 26, 27, 28, 30], ADAPTERS, () => this.bed.push("the base fixtures", baseTree(this.values)));
     if (!first) return;
     const pinned = await pinnedIssues(this.github);
     const issue = first.issues[0];
@@ -244,6 +253,44 @@ export class Verification {
         files.set(workflow, (files.get(workflow) ?? "").replace("  pull-requests: read\n", "  pull-requests: read\n  checks: write\n")),
       ),
     );
+
+    // 22: a change that moved before apply. First a push while apply is
+    // held after the tick, then a tick on a row whose scan is held.
+    const program = "pulumi/plain/greeting/Pulumi.yaml";
+    const addResource = (name: string) => (files: Tree) => {
+      const text = files.get(program) ?? "";
+      if (!text.includes("\noutputs:\n")) throw new HarnessError(`${program} has no outputs to add a resource before.`);
+      const resource = `  # Added by the release verification, scenario 22.\n  ${name}:\n    type: random:RandomId\n    properties:\n      byteLength: 3\n    options:\n      version: 4.21.2\n`;
+      return files.set(program, text.replace("\noutputs:\n", `\n${resource}outputs:\n`));
+    };
+    for (const [when, stack, run] of [
+      ["after the tick", MOVED_AFTER_TICK, (w: string, st: string) => this.bed.pushWhileApplyHeld(w, st, addResource("moved-after-tick"))],
+      ["a stale row", MOVED_STALE_ROW, (w: string, st: string) => this.bed.tickWhileScanHeld(w, st, addResource("moved-stale-row"))],
+    ] as const) {
+      const before = this.observed.at(-1);
+      since = new Date();
+      const moved = await this.step([22], ["Pu"], () => run(`a change that moved, ${when}, on ${stack}`, stack));
+      if (moved && before) this.add(scenario22(when, before, moved, since, stack, login));
+    }
+
+    // 27: two stacks of 600 changes each, over the size a full scan aims at.
+    const big = await this.step([27], ["Tofu"], () =>
+      this.bed.pushEdit("two stacks of 600 changes each", (files) => {
+        const next = overlay(files, "big", this.values);
+        const entries = BIG_STACKS.map((stack) => `  - path: ${stack}\n    tool: opentofu\n`).join("");
+        return next.set(config, `${next.get(config) ?? ""}${entries}`);
+      }),
+    );
+    if (big) {
+      const runs = new Map<string, boolean>();
+      for (const row of big.dashboard?.rows.values() ?? []) {
+        for (const match of row.block.matchAll(/\[summary\]\(https:\/\/github\.com\/sluiceway\/release-verify\/actions\/runs\/(\d+)\/attempts\/(\d+)\)/g)) {
+          const answer = await this.github.request("GET", repoPath(`/actions/runs/${match[1]}/attempts/${match[2]}`), undefined, [404]);
+          runs.set(match[0].slice("[summary](".length, -1), answer.status === 200);
+        }
+      }
+      this.add(scenario27(big, BIG_STACKS, BIG_CHANGES, runs));
+    }
 
     // 19: every result file of every step.
     try {
