@@ -1,4 +1,5 @@
 {
+  "SLUICEWAY_VERSION": "v0.41.0",
   "PULUMI_VERSION": "3.263.0",
   "TOFU_VERSION": "1.12.6"
 }

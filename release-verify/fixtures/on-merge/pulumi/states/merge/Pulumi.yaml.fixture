@@ -1,0 +1,14 @@
+name: states-merge
+runtime: yaml
+description: >-
+  A stack set to deploy on merge (release verification, scenario 31). The
+  push that adds it deploys it with no tick. A longer name then replaces the
+  pet, and a replace waits for a tick.
+resources:
+  name:
+    type: random:RandomPet
+    properties:
+      length: 2
+      prefix: merge
+    options:
+      version: 4.21.2

@@ -1,0 +1,16 @@
+name: states-values
+runtime: yaml
+description: >-
+  A value the row does not show (release verification, scenarios 32 and 33).
+  It deploys on merge first, then waits for a tick while VALUE changes, so a
+  tick can be refused for a value that changed since it, and later wait for a
+  deploy window.
+resources:
+  value:
+    type: command:local:Command
+    properties:
+      create: echo "the value is $VALUE"
+      environment:
+        VALUE: one
+    options:
+      version: 1.2.1
