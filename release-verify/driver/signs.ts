@@ -43,10 +43,12 @@ export function scenario17(o: Observed, destroying: string[]): Outcome[] {
   for (const stack of destroying) {
     check.expect(caution.includes(`**${stack}**`), `expected ${stack} in the caution block, found "${caution}"`, stack);
   }
+  // The words since v0.28.0 (#217); before, "destroy resources".
   const countsLine = o.dashboard?.countsLine ?? "";
+  const n = destroying.length;
   check.expect(
-    countsLine.includes(`${destroying.length} pending stacks destroy resources`) ||
-      countsLine.includes(`${destroying.length} pending stack destroys resources`),
+    countsLine.includes(n === 1 ? "**1 pending stack deletes or replaces resources**" : `**${n} pending stacks delete or replace resources**`) ||
+      countsLine.includes(n === 1 ? "1 pending stack destroys resources" : `${n} pending stacks destroy resources`),
     `expected the counts line to count ${destroying.length} destroying stacks, found "${countsLine}"`,
   );
   const picture = header(o);

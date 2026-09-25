@@ -1,7 +1,9 @@
 // The driver of the release verification (docs/release-verification.md).
 //
-//   node release-verify/driver/main.ts --version v0.22.0 [--keep]
+//   node release-verify/driver/main.ts [--version v0.22.0] [--keep]
 //
+// Without --version it verifies SLUICEWAY_VERSION of versions.json, the
+// release whose e2e the pinned tool versions were read from.
 // It resets sluiceway/release-verify, pushes the fixtures with Sluiceway
 // pinned to the tag, runs the scenarios, writes the summary and cleans up.
 // With --keep it leaves the last fixture commit and the dashboard in place,
@@ -25,7 +27,8 @@ const { values: args } = parseArgs({
   },
 });
 
-const version = args.version ?? "";
+const versions = JSON.parse(readFileSync(join(RELEASE_VERIFY, "versions.json"), "utf8")) as Record<string, string>;
+const version = args.version ?? versions.SLUICEWAY_VERSION ?? "";
 if (!/^v\d+\.\d+\.\d+$/.test(version)) {
   console.error(`A version of the form vX.Y.Z is needed, got "${version}".`);
   process.exit(2);
@@ -44,7 +47,6 @@ const ref = await github.get<{ object: { sha: string } }>(`/repos/${ACTION_REPO}
 const tagCommit = ref.object.sha;
 log(`verifying ${ACTION_REPO}@${version} (${tagCommit.slice(0, 7)}), output in ${out}`);
 
-const versions = JSON.parse(readFileSync(join(RELEASE_VERIFY, "versions.json"), "utf8")) as Record<string, string>;
 const values = { ...versions, SLUICEWAY_REF: version };
 
 log("resetting the test bed");
