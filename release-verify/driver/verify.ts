@@ -34,7 +34,18 @@ const SLOW_STACK = "pulumi/states/slow:prod";
 import { Check, type Outcome, type Status } from "./check.ts";
 import { HarnessError, pinnedIssues } from "./evidence.ts";
 import { baseTree, overlay, type Tree } from "./fixture.ts";
-import { GitHub, repoPath } from "./github.ts";
+import { GitHub, repoPath, sleep } from "./github.ts";
+import {
+  MERGE_STACK,
+  scenario31Deployed,
+  scenario31Waits,
+  scenario32Pending,
+  scenario32Refused,
+  scenario33Started,
+  scenario33Waiting,
+  scenario34,
+  VALUES_STACK,
+} from "./merge.ts";
 import { scenario22 } from "./moved.ts";
 import { scenario30 } from "./names.ts";
 import { scenario21 } from "./pair.ts";
@@ -44,7 +55,7 @@ import { scenario24, scenario25, scenario26Back, scenario26Personality, scenario
 import { scenario17, scenario18 } from "./signs.ts";
 import { scenario27 } from "./size.ts";
 import { newestState, onlyTickedChanged } from "./state.ts";
-import { scenario6, scenario6Rescan, scenario7 } from "./ticks.ts";
+import { madeIn, scenario6, scenario6Rescan, scenario7 } from "./ticks.ts";
 
 // The stacks one tick per adapter deploys in scenario 6. Scenario 17 then
 // deletes and replaces resources of these.
@@ -113,6 +124,83 @@ export class Verification {
     }
   }
 
+  // 31 to 33: two stacks set to on-merge, a replace that waits, a value that
+  // changed since the tick, and a tick outside the deploy window.
+  private async onMerge(login: string): Promise<void> {
+    const config = "sluiceway.yaml";
+    const mark = "  # Scenarios 31 to 33 of the release verification.\n";
+    // The entries of the two stacks, with `values` the lines of values:prod.
+    const entries = (values: string) => (files: Tree) => {
+      const text = files.get(config) ?? "";
+      const at = text.indexOf(mark);
+      const head = at < 0 ? text : text.slice(0, at);
+      return files.set(config, `${head}${mark}  - path: pulumi/states/merge\n    name: prod\n    deploy: on-merge\n  - path: pulumi/states/values\n    name: prod\n${values}`);
+    };
+    const replace = (path: string, from: string, to: string) => (files: Tree) => {
+      const text = files.get(path) ?? "";
+      if (!text.includes(from)) throw new HarnessError(`${path} has no "${from}" to change.`);
+      return files.set(path, text.replace(from, to));
+    };
+    const mergeProgram = "pulumi/states/merge/Pulumi.yaml";
+    const valuesProgram = "pulumi/states/values/Pulumi.yaml";
+
+    // 31: the push that adds them deploys both, with no tick.
+    let since = new Date();
+    const added = await this.step([31, 32, 33], ["Pu"], () =>
+      this.bed.pushEdit("two stacks set to deploy on merge", (files) => entries("    deploy: on-merge\n")(overlay(files, "on-merge", this.values))),
+    );
+    if (!added) return;
+    this.add(scenario31Deployed(added, since, [MERGE_STACK, VALUES_STACK], login));
+
+    // 31 and 32: a replace on the one, and on the other a new value once it
+    // is on a tick again.
+    since = new Date();
+    const waits = await this.step([31, 32, 33], ["Pu"], () =>
+      this.bed.pushEdit("a replace on a stack set to on-merge, and a new value on a stack on a tick", (files) =>
+        entries("")(replace(valuesProgram, "VALUE: one", "VALUE: two")(replace(mergeProgram, "length: 2", "length: 3")(files))),
+      ),
+    );
+    if (!waits) return;
+    this.add(scenario31Waits(waits, since, MERGE_STACK));
+    this.add(scenario32Pending(waits, since, VALUES_STACK));
+
+    // 32: the value moves again after the tick, before its scan wrote the row.
+    since = new Date();
+    const refused = await this.step([32, 33], ["Pu"], () =>
+      this.bed.tickWhileScanHeld(`a value that changed after the tick on ${VALUES_STACK}`, VALUES_STACK, replace(valuesProgram, "VALUE: two", "VALUE: three")),
+    );
+    if (!refused) return;
+    this.add(scenario32Refused(waits, refused, since, VALUES_STACK, login));
+
+    // 33: a window that opens a few minutes from now, a tick before it opens,
+    // then "Run workflow" once it is open. The schedule starts the same
+    // resolve; a run a cron starts cannot be timed to the minute.
+    const opens = new Date(Math.ceil((Date.now() + 9 * 60_000) / 60_000) * 60_000);
+    if (opens.getUTCHours() >= 23 || opens.getUTCDate() !== new Date().getUTCDate()) {
+      this.mark([33], ["Pu"], "skipped", "the window would open too close to midnight UTC for one window of the day");
+      return;
+    }
+    const hhmm = (d: Date) => d.toISOString().slice(11, 16);
+    const day = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"][opens.getUTCDay()];
+    const window = `    deployWindows:\n      - days: [${day}]\n        from: "${hhmm(opens)}"\n        to: "${hhmm(new Date(opens.getTime() + 60 * 60_000))}"\n`;
+    const windowed = await this.step([33], ["Pu"], () => this.bed.pushEdit(`a deploy window from ${hhmm(opens)} UTC on ${VALUES_STACK}`, entries(window)));
+    if (!windowed) return;
+    since = new Date();
+    const waiting = await this.step([33], ["Pu"], () => this.bed.tick(`a tick on ${VALUES_STACK} before its window opens`, [VALUES_STACK]));
+    if (!waiting) return;
+    if (Date.now() >= opens.getTime()) {
+      this.mark([33], ["Pu"], "error", `the tick's run ended after the window opened at ${hhmm(opens)} UTC, so it proves nothing about a closed window`);
+      return;
+    }
+    this.add(scenario33Waiting(waiting, since, VALUES_STACK, login, `${opens.toISOString().slice(0, 10)} ${hhmm(opens)}`));
+    const waitedId = madeIn(waiting, since).find((d) => d.task === `sluiceway:${VALUES_STACK}`)?.id;
+    this.log(`waiting until the window opens at ${hhmm(opens)} UTC`);
+    await sleep(opens.getTime() - Date.now() + 20_000);
+    since = new Date();
+    const started = await this.step([33], ["Pu"], () => this.bed.dispatch("a run inside the deploy window"));
+    if (started) this.add(scenario33Started(waitedId, started, since, VALUES_STACK, login));
+  }
+
   async run(): Promise<void> {
     const base = all(BASE_STACKS);
     const login = (await this.github.get<{ login: string }>("/user")).login;
@@ -120,7 +208,7 @@ export class Verification {
 
     // 1 and 3: the first scan on a reset test bed.
     let since = new Date();
-    const first = await this.step([1, 2, 3, 4, 5, 6, 7, 17, 18, 19, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30], ADAPTERS, () => this.bed.push("the base fixtures", baseTree(this.values)));
+    const first = await this.step([1, 2, 3, 4, 5, 6, 7, 17, 18, 19, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34], ADAPTERS, () => this.bed.push("the base fixtures", baseTree(this.values)));
     if (!first) return;
     const pinned = await pinnedIssues(this.github);
     const issue = first.issues[0];
@@ -138,8 +226,10 @@ export class Verification {
     }
 
     // 2, 4 and 5: a comment keeps every hash, a new resource moves some.
-    const stable = await this.step([2, 4, 5], ADAPTERS, () => this.bed.push("a comment in a Pulumi program and an OpenTofu var file", "hash-stable"));
+    const stable = await this.step([2, 4, 5, 34], ADAPTERS, () => this.bed.push("a comment in a Pulumi program and an OpenTofu var file", "hash-stable"));
     if (stable) {
+      // 34: the first scan that finds a dashboard says it is running.
+      this.add(scenario34(stable));
       this.add(scenario2(first, stable, base, "after a comment"));
       this.add(scenario4(first, stable, base, CLAIMING, "after a comment"));
       this.add(scenario5(first, stable, base, [], "a comment"));
@@ -320,6 +410,8 @@ export class Verification {
       return observed;
     });
     void merged;
+
+    await this.onMerge(login);
 
     // 21: two ticks within seconds, by two people.
     if (!this.second) {

@@ -20,13 +20,13 @@ function matrixOf(o: Observed): MatrixEntry[] {
   return entries;
 }
 
-const payloadOf = (deployment: Deployment): Record<string, unknown> =>
+export const payloadOf = (deployment: Deployment): Record<string, unknown> =>
   typeof deployment.payload === "string"
     ? (JSON.parse(deployment.payload || "{}") as Record<string, unknown>)
     : deployment.payload;
 
 // The deployment records the step made.
-const madeIn = (o: Observed, since: Date): Deployment[] =>
+export const madeIn = (o: Observed, since: Date): Deployment[] =>
   o.deployments.filter((d) => Date.parse(d.created_at) >= since.getTime() - 5_000);
 
 const runUrls = (o: Observed): string[] => o.runs.map((run) => run.html_url);

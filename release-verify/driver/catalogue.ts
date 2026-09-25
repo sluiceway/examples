@@ -26,6 +26,10 @@ export const SCENARIOS: Record<number, string> = {
   28: "No preview pages without checks: write",
   29: "A merged pull request on the row",
   30: "A hostile name stays plain text",
+  31: "Deploy on merge, and a replace waits",
+  32: "A value changed since the tick",
+  33: "A tick outside the deploy window",
+  34: "The scan-running line",
 };
 
 // The stacks of the base fixtures, by adapter. The scratch stack is ignored.
@@ -44,6 +48,9 @@ export const BROKEN_STACKS: Record<Adapter, string[]> = {
 // The stacks with 600 changes each that the overlay big adds for scenario 27.
 export const BIG_STACKS = ["opentofu/big-a", "opentofu/big-b"];
 export const BIG_CHANGES = 600;
+
+// The Pulumi stacks the overlays slow and on-merge add, for 23 and 31 to 33.
+export const PULUMI_STATES = ["pulumi/states/slow:prod", "pulumi/states/merge:prod", "pulumi/states/values:prod"];
 
 export const IGNORED = { "pulumi/plain/greeting:scratch": "A scratch stack. It is never deployed from here." };
 export const TITLE = "Sluiceway release verification";
@@ -67,7 +74,7 @@ export const all = (stacks: Record<Adapter, string[]>): string[] => ADAPTERS.fla
 
 export function adapterOf(stack: string): Adapter {
   if (BIG_STACKS.includes(stack)) return "Tofu";
-  if (stack === "pulumi/states/slow:prod") return "Pu";
+  if (PULUMI_STATES.includes(stack)) return "Pu";
   const adapter = ADAPTERS.find((a) => BASE_STACKS[a].includes(stack) || BROKEN_STACKS[a].includes(stack));
   if (!adapter) throw new Error(`No adapter holds the stack ${stack}.`);
   return adapter;

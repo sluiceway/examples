@@ -31,6 +31,10 @@ jobs:
     if: github.event_name != 'issues'
     runs-on: ubuntu-latest
     concurrency: sluiceway-scan
+    # The deploys the scan of a push hands on, for stacks set to on-merge
+    # (the action's docs/split-workflow.md, "Merge and deploy").
+    outputs:
+      matrix: ${{ steps.sluiceway.outputs.matrix }}
     env:
       # Public on purpose: every secret in this repo is fake.
       PULUMI_CONFIG_PASSPHRASE: sluiceway-examples
@@ -87,7 +91,7 @@ jobs:
           include-hidden-files: true
 
   resolve:
-    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'issues' && contains(github.event.issue.labels.*.name, 'sluiceway'))
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule' || (github.event_name == 'issues' && contains(github.event.issue.labels.*.name, 'sluiceway'))
     runs-on: ubuntu-latest
     concurrency: sluiceway-resolve
     outputs:
@@ -197,9 +201,95 @@ jobs:
           path: ${{ runner.temp }}/verification
           include-hidden-files: true
 
+  # A copy of apply that takes the scan's matrix: the deploys of stacks set
+  # to on-merge.
+  apply-merged:
+    needs: scan
+    if: ${{ !cancelled() && needs.scan.outputs.matrix != '' && needs.scan.outputs.matrix != '[]' }}
+    strategy:
+      fail-fast: false
+      # Every stack shares the one saved state, so the deploys go one at a
+      # time, as in sluiceway/examples.
+      max-parallel: 1
+      matrix:
+        include: ${{ fromJson(needs.scan.outputs.matrix) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    concurrency:
+      group: sluiceway-apply
+      queue: max
+    environment:
+      name: ${{ matrix.environment }}
+      deployment: false
+    env:
+      PULUMI_CONFIG_PASSPHRASE: sluiceway-examples
+    steps:
+      # Waits while the branch release-verify-hold-apply exists, at most ten
+      # minutes, so the driver can change the repo between two jobs
+      # (release verification, scenario 22). Without the branch it goes on
+      # at once.
+      - name: Hold (verification)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for i in $(seq 1 60); do
+            gh api "repos/${{ github.repository }}/git/ref/heads/release-verify-hold-apply" --silent 2>/dev/null || exit 0
+            echo "Held by the release verification ($i)."
+            sleep 10
+          done
+      - uses: actions/checkout@v7
+
+      - uses: pulumi/actions@v7
+        with:
+          pulumi-version: "{{PULUMI_VERSION}}"
+      - uses: opentofu/setup-opentofu@v2
+        with:
+          tofu_version: "{{TOFU_VERSION}}"
+          tofu_wrapper: false
+
+      - name: Restore the state (stand-in)
+        id: state
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          echo "PULUMI_BACKEND_URL=file://$RUNNER_TEMP/pulumi-state" >> "$GITHUB_ENV"
+          .github/scripts/state.sh restore
+      - name: Create the missing stacks (stand-in)
+        run: .github/scripts/create-missing-stacks.sh
+
+      - id: sluiceway
+        uses: sluiceway/sluiceway@{{SLUICEWAY_REF}}
+        with:
+          mode: apply
+          deployment-id: ${{ matrix.deployment }}
+
+      - name: Save the state (stand-in)
+        if: always() && steps.state.outcome == 'success'
+        run: .github/scripts/state.sh pack
+      - uses: actions/upload-artifact@v7
+        if: always() && steps.state.outcome == 'success'
+        with:
+          name: state-${{ github.run_id }}-${{ github.run_attempt }}-merged-${{ strategy.job-index }}
+          path: ${{ runner.temp }}/state
+          retention-days: 7
+
+      - name: Keep the outputs (verification)
+        if: always()
+        env:
+          OUTCOME: ${{ steps.sluiceway.outcome }}
+          OUTPUTS: ${{ toJSON(steps.sluiceway.outputs) }}
+          RESULT_FILE: ${{ steps.sluiceway.outputs.result-file }}
+        run: .github/scripts/keep-outputs.sh
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: release-verify-${{ github.run_id }}-${{ github.run_attempt }}-apply-merged-${{ strategy.job-index }}
+          path: ${{ runner.temp }}/verification
+          include-hidden-files: true
+
   settle:
-    needs: [resolve, apply]
-    if: always() && needs.resolve.outputs.matrix != '' && needs.resolve.outputs.matrix != '[]'
+    needs: [scan, resolve, apply, apply-merged]
+    if: always() && ((needs.resolve.outputs.matrix != '' && needs.resolve.outputs.matrix != '[]') || (needs.scan.outputs.matrix != '' && needs.scan.outputs.matrix != '[]'))
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
