@@ -36,6 +36,9 @@ export interface WaitOptions {
   since: Date;
   timeoutMinutes?: number;
   log?: (line: string) => void;
+  // Called once for each run as soon as it is seen completed, so its logs
+  // can be kept before anything else touches the test bed.
+  ended?: (run: Run) => Promise<void>;
 }
 
 // Waits for the runs a step started, and for every run they started in turn,
@@ -48,6 +51,7 @@ export async function waitQuiet(github: GitHub, options: WaitOptions): Promise<R
   let lastLine = "";
   for (;;) {
     const runs = (await listRuns(github)).filter((run) => startedAt(run) >= since);
+    if (options.ended) for (const run of runs.filter((r) => r.status === "completed")) await options.ended(run);
     const started = runs.some(options.expect);
     const open = runs.filter((run) => run.status !== "completed");
     quietReads = started && open.length === 0 ? quietReads + 1 : 0;

@@ -241,6 +241,37 @@ The four new scenarios, built for what `v0.29.0` to `v0.40.0` added, passed in b
 
 The test bed's workflow gained the scan's `outputs:`, `apply-merged` and a `settle` that waits for both, as the action's `docs/split-workflow.md` asks for a stack set to on-merge, and `schedule` in the `if:` of `resolve`, for deploy windows. `versions.json` now also holds `SLUICEWAY_VERSION`, the release those tool versions were read from, and the driver verifies it when no `--version` is given.
 
+## 2026-09-26: the verification against v0.44.0
+
+The driver ran against `v0.44.0` (`997546c`), the newest release, on 2026-09-25 from 22:26 to 23:35 UTC, a local run with the owner's `gh` login as the ticker, in 1,223 requests. The tool versions are unchanged: the action's `e2e.yml` at the tag still pins Pulumi v3.263.0 and OpenTofu 1.12.6.
+
+| Run | Scenarios | Passed | Failed | Skipped |
+|---|---|---|---|---|
+| `v0.41.0`, the last of 2026-09-25 | 1 to 34 | 34 | 3 (22, 23, 30) | 3 |
+| `v0.44.0` | 1 to 37 | 42 | 0 | 3 |
+
+The counts are cells of the summary, a scenario per adapter. The skips are the same as before: 21 and the `admin` part of 7 need a second account. The runs of the test bed are deleted by the next reset; the job logs and everything the driver read are kept in the local output of the run.
+
+The three failures of `v0.41.0` pass, each because its fix shipped in `v0.42.2`, and each assertion now checks the fix itself, not only the symptom:
+
+- **22, after the tick: fixed by [#274](https://github.com/sluiceway/sluiceway/pull/274), record 0111, for [#270](https://github.com/sluiceway/sluiceway/issues/270).** The push landed while `apply` was held; `apply` compared the commit it checked out with `main`, refused with `main moved on from <commit>, the commit this run checked out, to a commit that changes a file pulumi/plain/greeting:prod claims: pulumi/plain/greeting/Pulumi.yaml.`, ran no fresh preview, ended the record `error`, "the change moved since the tick", and started a full scan. That scan wrote the row pending with the new hash (`creates="3"`) and the failure line, and the comment says `a newer commit reached the branch before the deploy started`. The row was never in sync. The stale-row half passes as before.
+- **23, the minute: fixed by [#275](https://github.com/sluiceway/sluiceway/pull/275), record 0113, for [#272](https://github.com/sluiceway/sluiceway/issues/272).** `settle` wrote the row itself 30 seconds after the cancel (44 to 63 seconds on `v0.41.0`, and 101 on `v0.26.1`): `no preview since its deploy ended, the next scan previews it`, state `preview-failed`, no box, the failure line right under it, and the log line `Wrote the failure line on the row of pulumi/states/slow:prod, before the full scan previews it again (record 0113).` The scan after it left the pending row with the same failure line. The re-run half passes as before.
+- **30: fixed by [#273](https://github.com/sluiceway/sluiceway/pull/273), record 0112, for [#271](https://github.com/sluiceway/sluiceway/issues/271).** The row holds `<span>#</span>1 <span>@</span>sluiceway www&#46;example.com &#42;x&#42;`, and neither the dashboard as GitHub renders it nor the preview page through `POST /markdown` holds an issue link, a mention, an autolink or emphasis in the name.
+
+Three new scenarios, for what `v0.42.0` to `v0.44.0` added, passed:
+
+- **35, a deploy freeze** (record 0115): a push adds a freeze from 23:14 to 23:24 UTC with a reason. The dashboard says `Deploy freeze until 2026-09-25 23:24 UTC (Release verification freeze): every deploy waits for it to end.` A tick on `greeting:dev` inside it opened a record with `window: true`, started no `apply`, and the row read `queued for the end of the deploy freeze (Release verification freeze) at 2026-09-25 23:24 UTC · ticked by robbeverhelst`. "Run workflow" after the end ended that record as "started in a later run" and deployed it in a record of its own with the same hash, and the freeze line was gone.
+- **36, the layout keys** (record 0114): at `pendingDetail: compact` with `inSyncSection: off`, every pending row kept its `:warning: DELETE` and `REPLACE` lines and its failure line and lost its folds of changes, every marker was the one the full layout wrote, the two in sync rows sat whole in `2 stacks in sections this dashboard does not show`, and the counts line still counted them. Taking the keys out brought the heading, the ignored stacks and the folds back.
+- **37, counts on a pending row's marker** (record 0110): on every pending row a scan of a step wrote, `creates`, `updates`, `replaces`, `deletes` and `destroys` match the result file and the first line, and the run met each of them. `tracking` and the `behind` of a queued row were not met: no fixture moves a resource, and no scenario queues a stack behind another.
+
+The harness changed in three ways besides:
+
+- **33 across midnight.** It used to skip itself when the window would open after 23:00 UTC. It now writes an hour that crosses midnight as two windows, to `24:00` and from `00:00`, and this run met exactly that: the window opened at 23:14 UTC.
+- **The shared test bed.** The driver now waits until the newest commit of the test bed ends in `: done` before its reset, and hands the test bed back with a `: done` commit even when it fails.
+- **Logs as runs end.** Each run's logs are kept the moment it is seen completed, in `logs/` of the output, instead of only when the step ends.
+
+No bug of the action was found, so nothing was filed.
+
 ## 2026-09-22: the acceptance checklist, triaged, against v0.26.0
 
 The action's `docs/acceptance.md` at `v0.26.0` has 60 unticked items. Each one is sorted below by what can prove it: a scenario of the [release verification](release-verification.md) that passes today, a scenario that is planned or new, or a person. The checklist is written for one setup, a private repo with self-hosted runners, a real secret manager and a wrapper script around the tool, and a row says so when that setup, not the feature, is what keeps an item off a runner. File and line refer to the action at `v0.26.0`.

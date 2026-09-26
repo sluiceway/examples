@@ -7,12 +7,20 @@
 //   starts, as a merge that lands between a tick and its deploy;
 // - a stale row: the tick lands on a row whose commit is no longer the head,
 //   because the scan of the newer push is held.
+//
+// After the tick, since v0.42.2 (record 0111): `apply` compares the commit
+// it checked out with the head of its branch before the fresh preview,
+// refuses without running the tool, starts a full scan that writes the row,
+// and tells the ticker a newer commit reached the branch.
 import { keptOf, type Observed } from "./bed.ts";
 import { Check, type Outcome } from "./check.ts";
 import { jobLogs } from "./evidence.ts";
 import { runUrls } from "./scans.ts";
 
 const MOVED = "the change moved since the tick";
+
+// The file the push after the tick changes, which the stack claims.
+const PROGRAM = "pulumi/plain/greeting/Pulumi.yaml";
 
 export function scenario22(
   when: string,
@@ -46,18 +54,34 @@ export function scenario22(
   check.equal(apply?.outputs.outcome, "refused", `${when}: the output outcome of apply`);
   check.equal((apply?.result as { reason?: string } | null)?.reason, MOVED, `${when}: reason in apply's result file`);
   const logs = apply ? o.logs.get(apply.run.id) : undefined;
+  const applyLog = logs ? jobLogs(logs, "apply").join("\n") : "";
   const line = `${stack} was not deployed: ${MOVED}.`;
-  check.expect(
-    logs !== undefined && jobLogs(logs, "apply").some((log) => log.includes(line)),
-    `${when}: expected "${line}" in the log of apply`,
-  );
+  check.expect(applyLog.includes(line), `${when}: expected "${line}" in the log of apply`);
+
+  // After the tick the refusal comes from the comparison with the branch
+  // (record 0111): the tool never ran, and apply started the full scan.
+  const afterTick = when === "after the tick";
+  if (afterTick) {
+    const moved =
+      /main moved on from [0-9a-f]{7}, the commit this run checked out, to a commit that changes a file /.test(applyLog) &&
+      applyLog.includes(`${stack} claims: ${PROGRAM}.`);
+    check.expect(moved, `${when}: expected "main moved on from <commit>, the commit this run checked out, to a commit that changes a file ${stack} claims: ${PROGRAM}." in the log of apply`);
+    check.expect(!applyLog.includes("The fresh preview gives diff hash"), `${when}: apply ran a fresh preview, which record 0111 says it skips`);
+    check.expect(
+      applyLog.includes("A full scan was started, which shows the change as it is now on the row."),
+      `${when}: expected "A full scan was started, which shows the change as it is now on the row." in the log of apply`,
+    );
+    check.expect(o.runs.some((r) => r.event === "workflow_dispatch"), `${when}: expected the full scan apply started`);
+  }
 
   // One comment that mentions the ticker.
   const comments = o.comments.filter((c) => Date.parse(c.created_at) >= since.getTime() - 5_000);
   check.equal(
     comments.map((c) => c.body.trim()),
     [
-      `@${login} ticked **${stack}**, and ${MOVED}, so nothing was deployed. The row on the dashboard shows the change as it is now. Tick it again to deploy that.`,
+      afterTick
+        ? `@${login} ticked **${stack}**, and a newer commit reached the branch before the deploy started, so nothing was deployed. The next scan shows the change as it is now on its row. Tick it again to deploy that.`
+        : `@${login} ticked **${stack}**, and ${MOVED}, so nothing was deployed. The row on the dashboard shows the change as it is now. Tick it again to deploy that.`,
     ],
     `${when}: the comments on the dashboard`,
   );

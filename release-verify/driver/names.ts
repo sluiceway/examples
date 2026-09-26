@@ -1,9 +1,9 @@
 // Scenario 30: a resource name that GitHub turns into links when it reaches
 // a page as it is, "#1 @sluiceway www.example.com *x*", stays plain text on
 // the dashboard and on the stack's preview page. It reads what GitHub
-// renders, not only the Markdown: the escaping writes `*` as a reference, but
-// nothing in it stops an issue reference, a mention or an autolink
-// (`src/render/escape.ts`, `docs/later.md`, "Stopping GitHub from linking").
+// renders, not only the Markdown. Since v0.42.2 the escaping puts `#` and `@`
+// in a span and writes the dot of `www.` as a reference (record 0112), and
+// before it wrote only `*` as one (`src/render/escape.ts`).
 import type { Observed } from "./bed.ts";
 import { HOSTILE_STACK } from "./catalogue.ts";
 import { Check, type Outcome } from "./check.ts";
@@ -38,9 +38,10 @@ function linked(check: Check, html: string | undefined, where: string): void {
 export function scenario30(o: Observed, pageHtml: string | undefined): Outcome[] {
   const check = new Check(30, ["Tofu"]);
   const row = o.dashboard?.rows.get(HOSTILE_STACK);
+  const escaped = "<span>#</span>1 <span>@</span>sluiceway www&#46;example.com &#42;x&#42;";
   check.expect(
-    row?.block.includes("#1 @sluiceway www.example.com &#42;x&#42;") === true,
-    `expected the name on the row of ${HOSTILE_STACK}, with its * written as &#42;`,
+    row?.block.includes(escaped) === true,
+    `expected the name on the row of ${HOSTILE_STACK} as record 0112 escapes it, "${escaped}", found: ${row?.block}`,
   );
   linked(check, o.html, "dashboard");
   linked(check, pageHtml, `preview page of ${HOSTILE_STACK}`);
