@@ -30,6 +30,9 @@ export const SCENARIOS: Record<number, string> = {
   32: "A value changed since the tick",
   33: "A tick outside the deploy window",
   34: "The scan-running line",
+  35: "A tick inside a deploy freeze",
+  36: "Layout keys keep the destroy lines",
+  37: "Counts on a pending row's marker",
 };
 
 // The stacks of the base fixtures, by adapter. The scratch stack is ignored.

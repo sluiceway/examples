@@ -1,14 +1,17 @@
 // Scenario 23: a deploy cancelled while it runs, then "Re-run failed jobs"
 // on that run. The cancel ends the record as "the run ended without a
-// result", and settle's scan puts the failure line on the row within a
-// minute (acceptance item 10). The re-run deploys nothing and says to tick
+// result", and the failure line is on the row within a minute (acceptance
+// item 10). Since v0.42.2 settle writes it itself, with no tool, before the
+// full scan it starts previews the stack again (record 0113). The re-run deploys nothing and says to tick
 // again (item 11, record 0019).
 import type { Deployment, Observed } from "./bed.ts";
 import { Check, type Outcome } from "./check.ts";
-import { jobLogs } from "./evidence.ts";
+import { jobLogs, parseDashboard } from "./evidence.ts";
 import { runUrls } from "./scans.ts";
 
 const ENDED = "the run ended without a result";
+// The words of the row settle writes for a deploy it ended (record 0113).
+const SETTLED = "no preview since its deploy ended, the next scan previews it";
 
 const recordOf = (o: Observed, since: Date, stack: string): Deployment | undefined =>
   o.deployments.find((d) => d.task === `sluiceway:${stack}` && Date.parse(d.created_at) >= since.getTime() - 5_000);
@@ -30,6 +33,21 @@ export function scenario23Cancel(o: Observed, since: Date, cancelledAt: Date, ru
   check.expect(settle?.includes(ended) === true, `expected "${ended}" in the log of settle`);
   check.expect(settle?.includes("Started a full scan") === true, 'expected "Started a full scan" in the log of settle');
   check.expect(o.runs.some((r) => r.event === "workflow_dispatch"), "expected the full scan settle started");
+  const wrote = `Wrote the failure line on the row of ${stack}, before the full scan previews it again (record 0113).`;
+  check.expect(settle?.includes(wrote) === true, `expected "${wrote}" in the log of settle`);
+
+  // The row settle wrote, before the scan: no box, no diff, the failure line
+  // right under its first line.
+  const settledEdit = o.edits.find((edit) => parseDashboard(edit.body).rows.get(stack)?.firstLine.includes(SETTLED));
+  const settled = settledEdit ? parseDashboard(settledEdit.body).rows.get(stack) : undefined;
+  check.expect(settled !== undefined, `expected a revision of the body where the row of ${stack} says "${SETTLED}"`);
+  if (settled) {
+    check.equal([settled.state, settled.attributes.failed, settled.hasBox], ["preview-failed", "true", false], `state, failed and box of the row settle wrote for ${stack}`);
+    check.expect(
+      (settled.block.split("\n")[1] ?? "").startsWith(`  :x: last deploy failed: ${ENDED} · ticked by ${login} · `),
+      `expected the failure line right under the first line of the row settle wrote, found: ${settled.block}`,
+    );
+  }
 
   // The row has the failure line, and it came within a minute.
   const line = `:x: last deploy failed: ${ENDED} · ticked by ${login} · `;

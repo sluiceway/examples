@@ -46,6 +46,7 @@ import {
   scenario34,
   VALUES_STACK,
 } from "./merge.ts";
+import { FREEZE_REASON, FREEZE_STACK, scenario35Line, scenario35Started, scenario35Waiting, scenario36Back, scenario36Compact, scenario37 } from "./layout.ts";
 import { scenario22 } from "./moved.ts";
 import { scenario30 } from "./names.ts";
 import { scenario21 } from "./pair.ts";
@@ -174,15 +175,18 @@ export class Verification {
 
     // 33: a window that opens a few minutes from now, a tick before it opens,
     // then "Run workflow" once it is open. The schedule starts the same
-    // resolve; a run a cron starts cannot be timed to the minute.
+    // resolve; a run a cron starts cannot be timed to the minute. A window
+    // of an hour that crosses midnight UTC is two: to 24:00 on the day it
+    // opens, and from 00:00 on the next.
     const opens = new Date(Math.ceil((Date.now() + 9 * 60_000) / 60_000) * 60_000);
-    if (opens.getUTCHours() >= 23 || opens.getUTCDate() !== new Date().getUTCDate()) {
-      this.mark([33], ["Pu"], "skipped", "the window would open too close to midnight UTC for one window of the day");
-      return;
-    }
+    const closes = new Date(opens.getTime() + 60 * 60_000);
     const hhmm = (d: Date) => d.toISOString().slice(11, 16);
-    const day = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"][opens.getUTCDay()];
-    const window = `    deployWindows:\n      - days: [${day}]\n        from: "${hhmm(opens)}"\n        to: "${hhmm(new Date(opens.getTime() + 60 * 60_000))}"\n`;
+    const dayOf = (d: Date) => ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"][d.getUTCDay()];
+    const entry = (d: Date, from: string, to: string) => `      - days: [${dayOf(d)}]\n        from: "${from}"\n        to: "${to}"\n`;
+    const window =
+      closes.getUTCDate() === opens.getUTCDate()
+        ? `    deployWindows:\n${entry(opens, hhmm(opens), hhmm(closes))}`
+        : `    deployWindows:\n${entry(opens, hhmm(opens), "24:00")}${hhmm(closes) === "00:00" ? "" : entry(closes, "00:00", hhmm(closes))}`;
     const windowed = await this.step([33], ["Pu"], () => this.bed.pushEdit(`a deploy window from ${hhmm(opens)} UTC on ${VALUES_STACK}`, entries(window)));
     if (!windowed) return;
     since = new Date();
@@ -201,6 +205,65 @@ export class Verification {
     if (started) this.add(scenario33Started(waitedId, started, since, VALUES_STACK, login));
   }
 
+  // 35: a deploy freeze that holds now and ends a few minutes from now. A
+  // tick inside it waits and its row names the freeze; "Run workflow" after
+  // its end starts the deploy. The freeze is on the wall of the dashboard
+  // zone, which on the test bed is UTC.
+  private async freeze(login: string): Promise<void> {
+    const config = "sluiceway.yaml";
+    const now = Date.now();
+    const from = new Date(Math.floor(now / 60_000) * 60_000 - 60_000);
+    const ends = new Date(Math.ceil((now + 8 * 60_000) / 60_000) * 60_000);
+    const at = (d: Date) => d.toISOString().slice(0, 16);
+    const frozen = await this.step([35], ["Pu"], () =>
+      this.bed.pushEdit(`a deploy freeze until ${at(ends)} UTC`, (files) => {
+        const text = files.get(config) ?? "";
+        if (!text.includes("\nstacks:\n")) throw new HarnessError(`${config} has no stacks list to put the freeze before.`);
+        const block = `# A deploy freeze (release verification, scenario 35).\nfreezes:\n  - from: "${at(from)}"\n    to: "${at(ends)}"\n    reason: ${FREEZE_REASON}\n\n`;
+        return files.set(config, text.replace("\nstacks:\n", `\n${block}stacks:\n`));
+      }),
+    );
+    if (!frozen) return;
+    this.add(scenario35Line(frozen, ends));
+    const since = new Date();
+    const waiting = await this.step([35], ["Pu"], () => this.bed.tick(`a tick on ${FREEZE_STACK} inside the freeze`, [FREEZE_STACK]));
+    if (!waiting) return;
+    if (Date.now() >= ends.getTime()) {
+      this.mark([35], ["Pu"], "error", `the tick's run ended after the freeze ended at ${at(ends)} UTC, so it proves nothing about a freeze that holds`);
+      return;
+    }
+    this.add(scenario35Waiting(waiting, since, FREEZE_STACK, login, ends));
+    const waitedId = madeIn(waiting, since).find((d) => d.task === `sluiceway:${FREEZE_STACK}`)?.id;
+    this.log(`waiting until the freeze ends at ${at(ends)} UTC`);
+    await sleep(ends.getTime() - Date.now() + 20_000);
+    const after = new Date();
+    const started = await this.step([35], ["Pu"], () => this.bed.dispatch("a run after the freeze ended"));
+    if (started) this.add(scenario35Started(waitedId, started, after, FREEZE_STACK, login));
+  }
+
+  // 36: compact rows and In sync off, which also takes out the freeze of 35,
+  // then the keys taken out.
+  private async layout(): Promise<void> {
+    const config = "sluiceway.yaml";
+    const before = this.observed.at(-1);
+    const compact = await this.step([36], ADAPTERS, () =>
+      this.bed.pushEdit("dashboard.pendingDetail: compact and inSyncSection: off", (files) => {
+        let text = files.get(config) ?? "";
+        text = text.replace(/# A deploy freeze \(release verification, scenario 35\)\.\nfreezes:\n(?: {2,}.*\n)*\n/, "");
+        if (!text.includes("dashboard:\n")) throw new HarnessError(`${config} has no dashboard settings to add the layout keys to.`);
+        return files.set(config, text.replace("dashboard:\n", "dashboard:\n  pendingDetail: compact\n  inSyncSection: off\n"));
+      }),
+    );
+    if (!compact || !before) return;
+    this.add(scenario36Compact(before, compact));
+    const back = await this.step([36], ADAPTERS, () =>
+      this.bed.pushEdit("the layout keys taken out", (files) =>
+        files.set(config, (files.get(config) ?? "").replace("  pendingDetail: compact\n  inSyncSection: off\n", "")),
+      ),
+    );
+    if (back) this.add(scenario36Back(before, back));
+  }
+
   async run(): Promise<void> {
     const base = all(BASE_STACKS);
     const login = (await this.github.get<{ login: string }>("/user")).login;
@@ -208,7 +271,7 @@ export class Verification {
 
     // 1 and 3: the first scan on a reset test bed.
     let since = new Date();
-    const first = await this.step([1, 2, 3, 4, 5, 6, 7, 17, 18, 19, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34], ADAPTERS, () => this.bed.push("the base fixtures", baseTree(this.values)));
+    const first = await this.step([1, 2, 3, 4, 5, 6, 7, 17, 18, 19, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37], ADAPTERS, () => this.bed.push("the base fixtures", baseTree(this.values)));
     if (!first) return;
     const pinned = await pinnedIssues(this.github);
     const issue = first.issues[0];
@@ -412,6 +475,8 @@ export class Verification {
     void merged;
 
     await this.onMerge(login);
+    await this.freeze(login);
+    await this.layout();
 
     // 21: two ticks within seconds, by two people.
     if (!this.second) {
@@ -465,6 +530,9 @@ export class Verification {
       }
       this.add(scenario27(big, BIG_STACKS, BIG_CHANGES, runs));
     }
+
+    // 37: the counts on the marker of every pending row a scan wrote.
+    this.add(scenario37(this.observed));
 
     // 19: every result file of every step.
     try {

@@ -176,14 +176,23 @@ export function scenario33Waiting(o: Observed, since: Date, stack: string, login
 // ends as started in a later run.
 export function scenario33Started(waitedId: number | undefined, o: Observed, since: Date, stack: string, login: string): Outcome[] {
   const check = new Check(33, ["Pu"]);
+  startedLater(check, waitedId, o, since, stack, login, "the window opened");
+  return check.outcomes(runUrls(o));
+}
+
+// A record that waited for a time, a window (33) or the end of a freeze (35),
+// started by a run once the time came: it ends as started in a later run, a
+// record of its own with the same hash and ticker and no window deploys, and
+// the row is in sync.
+export function startedLater(check: Check, waitedId: number | undefined, o: Observed, since: Date, stack: string, login: string, when: string): void {
   const waited = o.deployments.find((d) => d.id === waitedId);
   check.equal(
     [waited?.statuses[0]?.state, waited?.statuses[0]?.description],
     ["inactive", "started in a later run"],
-    "the last status of the record that waited for the window",
+    "the last status of the record that waited",
   );
   const made = madeIn(o, since);
-  check.equal(made.map((d) => d.task), [`sluiceway:${stack}`], "the deployment records the run inside the window made");
+  check.equal(made.map((d) => d.task), [`sluiceway:${stack}`], `the deployment records the run after ${when} made`);
   const record = made[0];
   const payload = record ? payloadOf(record) : {};
   check.equal(payload.window, undefined, "window on the record that started");
@@ -191,9 +200,8 @@ export function scenario33Started(waitedId: number | undefined, o: Observed, sin
   check.equal(payload.hash, waited ? payloadOf(waited).hash : undefined, "the diff hash on the record that started, the one the tick approved");
   check.equal(record?.statuses[0]?.state, "success", "the last status of the record that started");
   const apply = keptOf(o, "apply")[0];
-  check.equal([apply?.outcome, apply?.outputs.outcome, apply?.outputs.stack], ["success", "deployed", stack], "apply in the run inside the window");
-  check.equal(o.dashboard?.rows.get(stack)?.state, "in-sync", `the state of ${stack} after the window opened`);
-  return check.outcomes(runUrls(o));
+  check.equal([apply?.outcome, apply?.outputs.outcome, apply?.outputs.stack], ["success", "deployed", stack], `apply in the run after ${when}`);
+  check.equal(o.dashboard?.rows.get(stack)?.state, "in-sync", `the state of ${stack} after ${when}`);
 }
 
 // 34: during the scan of a push the body said a scan is running, from the

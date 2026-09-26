@@ -61,15 +61,20 @@ export function scenario25(o: Observed, closed: number, pinned: number[]): Outco
   return check.outcomes(runUrls(o));
 }
 
-// The escaping of src/render/escape.ts, for names in the body.
+// The escaping of src/render/escape.ts, for names in the body, with the
+// rules of record 0112 for `#`, `@`, `www.`, `://` and `GH-`.
+const NAMED: Record<string, string> = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" };
 function escapeText(text: string): string {
   return text
     .replace(/[\p{Cc}\p{Zl}\p{Zp}]/gu, " ")
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/[*_`~[\]|\\]/g, (c) => `&#${c.charCodeAt(0)};`);
+    .replace(/www\.|:\/\/|gh-(?=\d)|[&<>"*_`~[\]|\\#@]/gi, (c) => {
+      if (NAMED[c] !== undefined) return NAMED[c];
+      if (c === "#" || c === "@") return `<span>${c}</span>`;
+      if (c === "://") return "&#58;//";
+      if (c.toLowerCase() === "www.") return `${c.slice(0, 3)}&#46;`;
+      if (c.toLowerCase() === "gh-") return `${c.slice(0, 2)}<span>-</span>`;
+      return `&#${c.charCodeAt(0)};`;
+    });
 }
 
 // Scenario 26, first part: with dashboard.redact no type, name or property

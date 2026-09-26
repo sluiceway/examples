@@ -18,6 +18,7 @@ import {
   type Run,
   runLogs,
   startedAt,
+  type WaitOptions,
   waitQuiet,
 } from "./evidence.ts";
 import { changedPaths, commit, overlay, type Tree } from "./fixture.ts";
@@ -78,6 +79,8 @@ export class Bed {
   private tree: Tree = new Map();
   private head: string | null = null;
   private steps = 0;
+  // The runs whose logs were kept as they ended, by id and attempt.
+  private readonly saved = new Set<string>();
   private readonly github: GitHub;
   private readonly values: Record<string, string>;
   private readonly out: string;
@@ -104,7 +107,7 @@ export class Bed {
     this.log(`pushed ${sha.slice(0, 7)}: ${what} (${changed.length} file(s))`);
     this.tree = tree;
     this.head = sha;
-    await waitQuiet(this.github, { expect: (run) => run.event === "push" && run.head_sha === sha, since, log: this.log });
+    await this.quiet({ expect: (run) => run.event === "push" && run.head_sha === sha, since });
     return this.observe(what, since);
   }
 
@@ -129,7 +132,7 @@ export class Bed {
     } finally {
       await this.hold("apply", false);
     }
-    await waitQuiet(this.github, { expect: (run) => run.event === "issues", since, log: this.log });
+    await this.quiet({ expect: (run) => run.event === "issues", since });
     return this.observe(what, since);
   }
 
@@ -149,7 +152,7 @@ export class Bed {
     } finally {
       await this.hold("scan", false);
     }
-    await waitQuiet(this.github, { expect: (run) => run.event === "push", since, log: this.log });
+    await this.quiet({ expect: (run) => run.event === "push", since });
     return this.observe(what, since);
   }
 
@@ -174,7 +177,7 @@ export class Bed {
     const cancelledAt = new Date();
     await this.github.request("POST", repoPath(`/actions/runs/${run.id}/cancel`));
     this.log(`cancelled run ${run.id}`);
-    await waitQuiet(this.github, { expect: (r) => r.event === "workflow_dispatch", since: cancelledAt, timeoutMinutes: 8, log: this.log });
+    await this.quiet({ expect: (r) => r.event === "workflow_dispatch", since: cancelledAt, timeoutMinutes: 8 });
     return { observed: await this.observe(what, since), cancelledAt, runId: run.id };
   }
 
@@ -183,7 +186,7 @@ export class Bed {
     const since = new Date();
     await this.github.request("POST", repoPath(`/actions/runs/${runId}/rerun-failed-jobs`), {});
     this.log(`re-ran the failed jobs of run ${runId}`);
-    await waitQuiet(this.github, { expect: (r) => r.id === runId && r.run_attempt > 1, since, log: this.log });
+    await this.quiet({ expect: (r) => r.id === runId && r.run_attempt > 1, since });
     return this.observe(what, since);
   }
 
@@ -209,7 +212,7 @@ export class Bed {
     this.tree = tree;
     this.head = sha;
     await this.github.request("DELETE", repoPath(`/git/refs/heads/${branch}`), undefined, [404, 422]);
-    await waitQuiet(this.github, { expect: (r) => r.event === "push" && r.head_sha === sha, since, log: this.log });
+    await this.quiet({ expect: (r) => r.event === "push" && r.head_sha === sha, since });
     return { observed: await this.observe(what, since), number };
   }
 
@@ -223,7 +226,7 @@ export class Bed {
     if (!issue) throw new HarnessError("The second account sees no open dashboard.");
     await other.request("PATCH", repoPath(`/issues/${issue.number}`), { body: tickBox(issue.body, second) });
     this.log(`ticked ${second} as the second account`);
-    await waitQuiet(this.github, { expect: (r) => r.event === "issues", since, log: this.log });
+    await this.quiet({ expect: (r) => r.event === "issues", since });
     return this.observe(what, since);
   }
 
@@ -234,8 +237,24 @@ export class Bed {
     if (!issue) throw new HarnessError("The second account sees no open dashboard.");
     await other.request("PATCH", repoPath(`/issues/${issue.number}`), { body: tickBox(issue.body, stack) });
     this.log(`ticked ${stack} as the second account`);
-    await waitQuiet(this.github, { expect: (r) => r.event === "issues", since, log: this.log });
+    await this.quiet({ expect: (r) => r.event === "issues", since });
     return this.observe(what, since);
+  }
+
+  // Waits until the test bed is quiet, and keeps the logs of every run the
+  // moment it is seen completed, in <out>/logs/<run>-<attempt>, before
+  // anything else can delete it.
+  private async quiet(options: Omit<WaitOptions, "ended" | "log">): Promise<Run[]> {
+    return waitQuiet(this.github, {
+      ...options,
+      log: this.log,
+      ended: async (run) => {
+        const key = `${run.id}-${run.run_attempt}`;
+        if (this.saved.has(key)) return;
+        this.saved.add(key);
+        await this.logsOf(run, this.out);
+      },
+    });
   }
 
   // The branch release-verify-hold-<job> holds that job of the test bed's
@@ -309,7 +328,7 @@ export class Bed {
     const since = new Date();
     await this.github.request("PATCH", repoPath(`/issues/${issue.number}`), { body });
     this.log(`ticked ${ticked}`);
-    await waitQuiet(this.github, { expect: (run) => run.event === "issues", since, log: this.log });
+    await this.quiet({ expect: (run) => run.event === "issues", since });
     return this.observe(what, since);
   }
 
@@ -328,7 +347,7 @@ export class Bed {
     const since = new Date();
     await this.github.request("POST", repoPath("/actions/workflows/deploy-dashboard.yml/dispatches"), { ref: "main" });
     this.log(`started the workflow: ${what}`);
-    await waitQuiet(this.github, { expect: (run) => run.event === "workflow_dispatch", since, log: this.log });
+    await this.quiet({ expect: (run) => run.event === "workflow_dispatch", since });
     return this.observe(what, since);
   }
 
